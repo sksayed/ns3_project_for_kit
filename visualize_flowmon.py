@@ -1,46 +1,81 @@
 #!/usr/bin/env python3
+# Parse FlowMonitor XML results and generate summary plots/CSV.
 import xml.etree.ElementTree as ET
+import matplotlib
+# Use a non-interactive backend so this works in headless environments.
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 def parse_flowmon_xml(xml_file):
-    """Parse FlowMonitor XML file and extract flow statistics"""
+    """Parse FlowMonitor XML file and extract per-flow statistics into a DataFrame."""
     tree = ET.parse(xml_file)
     root = tree.getroot()
     
+    def parse_time_to_seconds(value: str) -> float:
+        """Convert strings like '+2.0e+09ns', '25ms', '1.2s' to seconds (float)."""
+        if value is None:
+            return 0.0
+        v = value.strip()
+        if v.endswith('ns'):
+            return float(v[:-2]) / 1e9
+        if v.endswith('us'):
+            return float(v[:-2]) / 1e6
+        if v.endswith('ms'):
+            return float(v[:-2]) / 1e3
+        if v.endswith('s'):
+            return float(v[:-1])
+        return float(v)
+
+    def get_int(elem, attr, default=0):
+        """Safely read integer attributes; return default if missing/invalid."""
+        v = elem.get(attr)
+        try:
+            return int(v) if v is not None and v != '' else default
+        except Exception:
+            return default
+
     flows = []
+    # Iterate over <Flow> entries and collect key metrics.
     for flow in root.findall('.//Flow'):
+        flow_id = get_int(flow, 'flowId', default=-1)
+        if flow_id < 0:
+            continue
         flow_data = {
-            'flowId': int(flow.get('flowId')),
-            'timeFirstTxPacket': float(flow.get('timeFirstTxPacket')) / 1e9,  # Convert to seconds
-            'timeFirstRxPacket': float(flow.get('timeFirstRxPacket')) / 1e9,
-            'timeLastTxPacket': float(flow.get('timeLastTxPacket')) / 1e9,
-            'timeLastRxPacket': float(flow.get('timeLastRxPacket')) / 1e9,
-            'delaySum': float(flow.get('delaySum')) / 1e9,  # Convert to seconds
-            'jitterSum': float(flow.get('jitterSum')) / 1e9,
-            'lastDelay': float(flow.get('lastDelay')) / 1e9,
-            'maxDelay': float(flow.get('maxDelay')) / 1e9,
-            'minDelay': float(flow.get('minDelay')) / 1e9,
-            'txBytes': int(flow.get('txBytes')),
-            'rxBytes': int(flow.get('rxBytes')),
-            'txPackets': int(flow.get('txPackets')),
-            'rxPackets': int(flow.get('rxPackets')),
-            'lostPackets': int(flow.get('lostPackets')),
-            'timesForwarded': int(flow.get('timesForwarded'))
+            'flowId': flow_id,
+            'timeFirstTxPacket': parse_time_to_seconds(flow.get('timeFirstTxPacket')),
+            'timeFirstRxPacket': parse_time_to_seconds(flow.get('timeFirstRxPacket')),
+            'timeLastTxPacket': parse_time_to_seconds(flow.get('timeLastTxPacket')),
+            'timeLastRxPacket': parse_time_to_seconds(flow.get('timeLastRxPacket')),
+            'delaySum': parse_time_to_seconds(flow.get('delaySum')),
+            'jitterSum': parse_time_to_seconds(flow.get('jitterSum')),
+            'lastDelay': parse_time_to_seconds(flow.get('lastDelay')),
+            'maxDelay': parse_time_to_seconds(flow.get('maxDelay')),
+            'minDelay': parse_time_to_seconds(flow.get('minDelay')),
+            'txBytes': get_int(flow, 'txBytes'),
+            'rxBytes': get_int(flow, 'rxBytes'),
+            'txPackets': get_int(flow, 'txPackets'),
+            'rxPackets': get_int(flow, 'rxPackets'),
+            'lostPackets': get_int(flow, 'lostPackets'),
+            'timesForwarded': get_int(flow, 'timesForwarded')
         }
         flows.append(flow_data)
     
+    # Return as a pandas DataFrame for convenient plotting/aggregation.
     return pd.DataFrame(flows)
 
-def create_visualizations(df):
-    """Create various visualizations of the flow data"""
+def create_visualizations(df, out_dir="wifi_mesh_outputs"):
+    """Create multi-panel summary plots and save a PNG to out_dir."""
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
     fig.suptitle('WiFi Mesh Network Flow Analysis', fontsize=16)
     
     # 1. Throughput over time
     ax1 = axes[0, 0]
-    df['throughput_mbps'] = (df['rxBytes'] * 8) / ((df['timeLastRxPacket'] - df['timeFirstRxPacket']) * 1e6)
+    # Guard against zero/negative durations to avoid divide-by-zero.
+    duration = (df['timeLastRxPacket'] - df['timeFirstRxPacket']).replace(0, np.nan)
+    df['throughput_mbps'] = (df['rxBytes'] * 8) / (duration * 1e6)
+    df['throughput_mbps'] = df['throughput_mbps'].fillna(0)
     ax1.bar(df['flowId'], df['throughput_mbps'])
     ax1.set_xlabel('Flow ID')
     ax1.set_ylabel('Throughput (Mbps)')
@@ -49,7 +84,9 @@ def create_visualizations(df):
     
     # 2. Packet loss rate
     ax2 = axes[0, 1]
-    df['loss_rate'] = df['lostPackets'] / (df['txPackets'] + df['lostPackets']) * 100
+    # Packet loss = lost / (tx + lost), expressed as percentage.
+    denom = (df['txPackets'] + df['lostPackets']).replace(0, np.nan)
+    df['loss_rate'] = (df['lostPackets'] / denom * 100).fillna(0)
     ax2.bar(df['flowId'], df['loss_rate'])
     ax2.set_xlabel('Flow ID')
     ax2.set_ylabel('Packet Loss Rate (%)')
@@ -58,7 +95,8 @@ def create_visualizations(df):
     
     # 3. Average delay
     ax3 = axes[0, 2]
-    df['avg_delay'] = df['delaySum'] / df['rxPackets'] * 1000  # Convert to ms
+    # Average E2E delay = delaySum / rxPackets (ms), NaN-safe.
+    df['avg_delay'] = (df['delaySum'] / df['rxPackets'].replace(0, np.nan) * 1000).fillna(0)
     ax3.bar(df['flowId'], df['avg_delay'])
     ax3.set_xlabel('Flow ID')
     ax3.set_ylabel('Average Delay (ms)')
@@ -67,7 +105,8 @@ def create_visualizations(df):
     
     # 4. Jitter
     ax4 = axes[1, 0]
-    df['avg_jitter'] = df['jitterSum'] / df['rxPackets'] * 1000  # Convert to ms
+    # Average jitter = jitterSum / rxPackets (ms), NaN-safe.
+    df['avg_jitter'] = (df['jitterSum'] / df['rxPackets'].replace(0, np.nan) * 1000).fillna(0)
     ax4.bar(df['flowId'], df['avg_jitter'])
     ax4.set_xlabel('Flow ID')
     ax4.set_ylabel('Average Jitter (ms)')
@@ -94,9 +133,9 @@ def create_visualizations(df):
     ax6.set_title('Delay Distribution')
     ax6.grid(True, alpha=0.3)
     
+    # Save figure to disk (no GUI window shown due to Agg backend).
     plt.tight_layout()
-    plt.savefig('flowmon_analysis.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(f'{out_dir}/flowmon_analysis.png', dpi=300, bbox_inches='tight')
     
     # Print summary statistics
     print("\n=== Flow Summary Statistics ===")
@@ -109,12 +148,16 @@ def create_visualizations(df):
     print(f"Average jitter: {df['avg_jitter'].mean():.2f} ms")
 
 if __name__ == "__main__":
-    # Parse the XML file
-    df = parse_flowmon_xml('flowmon-wifi-mesh-playfield-rw.xml')
+    # Input/Output directory where the ns-3 simulation wrote its results.
+    in_dir = 'wifi_mesh_outputs'
+    xml_path = f"{in_dir}/flowmon-wifi-mesh-playfield-rw.xml"
+
+    # Parse FlowMonitor XML into a DataFrame.
+    df = parse_flowmon_xml(xml_path)
     
-    # Create visualizations
-    create_visualizations(df)
+    # Create and save plots summarizing throughput, loss, delay, jitter, bytes.
+    create_visualizations(df, out_dir=in_dir)
     
-    # Save detailed CSV report
-    df.to_csv('flowmon_analysis.csv', index=False)
-    print("Detailed analysis saved to 'flowmon_analysis.csv'")
+    # Save a CSV report with the raw per-flow statistics and derived metrics.
+    df.to_csv(f"{in_dir}/flowmon_analysis.csv", index=False)
+    print("Detailed analysis saved to 'wifi_mesh_outputs/flowmon_analysis.csv'")
