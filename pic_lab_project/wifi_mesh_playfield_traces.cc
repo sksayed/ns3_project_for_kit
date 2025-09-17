@@ -18,12 +18,20 @@
 
 using namespace ns3;
 
+static const std::string kOutDir = "wifi_mesh_outputs";
+
+// Output file name constants for easy configuration
+static const std::string kPcapPrefix = "wifi_mesh_playfield_rw_pcap";
+static const std::string kAsciiTracesPrefix = "wifi_mesh_playfield_ascii_traces";
+static const std::string kNetAnimFile = "netanim-wifi-mesh-playfield-rw.xml";
+static const std::string kFlowmonFile = "flowmon-wifi-mesh-playfield-rw.xml";
+
 // Write an ASCII grid of node and building positions to wifi_mesh_outputs/position_grid.txt
 static void WriteAsciiPositionGrid(const NodeContainer &nodes,
                                    const BuildingContainer &buildings,
                                    double fieldMeters,
                                    double cellMeters = 10.0,
-                                   const std::string &outDir = "wifi_mesh_outputs",
+                                   const std::string &outDir = kOutDir,
                                    const std::string &outName = "position_grid.txt") {
   const double fieldMin = 0.0;
   const double fieldMax = fieldMeters;
@@ -131,33 +139,66 @@ int main(int argc, char **argv) {
   // diagonal to ensure multi-hop
   MobilityHelper fixedMob;
   MobilityHelper midMob;
-  // Sayed at (0,0), Sadia at (400,400)
+  // Sayed at (0,0), Sadia at (400,400) - Set height to 1.5m for building propagation
   Ptr<ListPositionAllocator> fixedPos = CreateObject<ListPositionAllocator>();
-  fixedPos->Add(Vector(0.0, 0.0, 0.0));     // node 0: Sayed
-  fixedPos->Add(Vector(field, field, 0.0)); // node n-1: Sadia
+  fixedPos->Add(Vector(0.0, 0.0, 1.5));     // node 0: Sayed
+  fixedPos->Add(Vector(field, field, 1.5)); // node n-1: Sadia
   fixedMob.SetPositionAllocator(fixedPos);
   fixedMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
   fixedMob.Install(nodes.Get(0));
   fixedMob.Install(nodes.Get(nNodes - 1));
 
   // Middle nodes placed evenly along the (0,0) -> (400,400) diagonal
+  // Group 1: Nodes 1-3 (RandomWalk2d) - High speed, frequent direction changes
+  // Group 2: Nodes 4-6 (Gauss-Markov) - Medium speed, smooth movement
+  // Group 3: Nodes 7-8 (RandomDirection2d) - High speed, random direction changes
+  
   Ptr<ListPositionAllocator> midPos = CreateObject<ListPositionAllocator>();
   for (uint32_t i = 1; i < nNodes - 1; ++i) {
     double frac = static_cast<double>(i) / static_cast<double>(nNodes - 1);
     double x = frac * field;
     double y = frac * field;
-    midPos->Add(Vector(x, y, 0.0));
+    midPos->Add(Vector(x, y, 1.5));  // Set height to 1.5m for building propagation
   }
-  midMob.SetPositionAllocator(midPos);
-  midMob.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
+  
+  // Group 1: RandomWalk2d (nodes 1-3) - Increased speed to 200 m/s
+  MobilityHelper group1Mob;
+  group1Mob.SetPositionAllocator(midPos);
+  group1Mob.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
     "Bounds", RectangleValue(Rectangle(0, 400, 0, 400)),
-    "Time", TimeValue(Seconds(0.5)),
-    "Speed", StringValue("ns3::ConstantRandomVariable[Constant=50.0]"));
-  NodeContainer mids;
-  for (uint32_t i = 1; i < nNodes - 1; ++i) {
-    mids.Add(nodes.Get(i));
+    "Time", TimeValue(Seconds(0.3)),  // More frequent direction changes
+    "Speed", StringValue("ns3::ConstantRandomVariable[Constant=200.0]")); // Increased from 50 to 200 m/s
+  NodeContainer group1;
+  for (uint32_t i = 1; i <= 3; ++i) {
+    group1.Add(nodes.Get(i));
   }
-  midMob.Install(mids);
+  group1Mob.Install(group1);
+  
+  // Group 2: RandomWalk2d (nodes 4-6) - Medium speed, less frequent direction changes
+  MobilityHelper group2Mob;
+  group2Mob.SetPositionAllocator(midPos);
+  group2Mob.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
+    "Bounds", RectangleValue(Rectangle(0, 400, 0, 400)),
+    "Time", TimeValue(Seconds(1.0)),  // Less frequent direction changes
+    "Speed", StringValue("ns3::ConstantRandomVariable[Constant=150.0]")); // 150 m/s
+  NodeContainer group2;
+  for (uint32_t i = 4; i <= 6; ++i) {
+    group2.Add(nodes.Get(i));
+  }
+  group2Mob.Install(group2);
+  
+  // Group 3: RandomWalk2d (nodes 7-8) - High speed, very frequent direction changes
+  MobilityHelper group3Mob;
+  group3Mob.SetPositionAllocator(midPos);
+  group3Mob.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
+    "Bounds", RectangleValue(Rectangle(0, 400, 0, 400)),
+    "Time", TimeValue(Seconds(0.1)),  // Very frequent direction changes
+    "Speed", StringValue("ns3::ConstantRandomVariable[Constant=200.0]")); // 200 m/s
+  NodeContainer group3;
+  for (uint32_t i = 7; i <= 8; ++i) {
+    group3.Add(nodes.Get(i));
+  }
+  group3Mob.Install(group3);
 
   // Buildings / obstacles
   // Four horizontal wall segments: two below y=200 at y≈100, two above at y≈300
@@ -204,6 +245,11 @@ int main(int argc, char **argv) {
   // Wi‑Fi channel/PHY with low Tx power + limited range to force multi-hop
   YansWifiChannelHelper chan;
   chan.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
+  
+  // Add building-aware propagation loss model for realistic indoor/outdoor effects
+  // BuildingsHelper must be installed before this to classify nodes as indoor/outdoor
+  chan.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel");
+  
   // Use range cap small enough to connect only adjacent diagonal neighbors
   // Diagonal spacing ≈ 62.8 m for 10 nodes; set MaxRange to ~85 m
   chan.AddPropagationLoss("ns3::RangePropagationLossModel", "MaxRange",
@@ -215,7 +261,7 @@ int main(int argc, char **argv) {
   phy.Set("TxPowerEnd", DoubleValue(7.0));
   phy.Set("RxNoiseFigure", DoubleValue(7.0));
   // Ensure outputs directory exists at project root
-  std::system("mkdir -p wifi_mesh_outputs");
+  std::system(("mkdir -p " + kOutDir).c_str());
 
   // 802.11s mesh
   MeshHelper mesh = MeshHelper::Default();
@@ -225,10 +271,10 @@ int main(int argc, char **argv) {
   NetDeviceContainer devs = mesh.Install(phy, nodes);
 
   // Enable PCAP after devices/PHY are created
-  phy.EnablePcapAll("wifi_mesh_outputs/wifi_mesh_playfield_rw_pcap", true);
+  phy.EnablePcapAll(kOutDir + "/" + kPcapPrefix, true);
 
   // ASCII traces (.tr)
-  phy.EnableAsciiAll("wifi_mesh_outputs/wifi_mesh_playfield_ascii_traces");
+  phy.EnableAsciiAll(kOutDir + "/" + kAsciiTracesPrefix);
   
 
   // Internet + IPs
@@ -238,33 +284,37 @@ int main(int argc, char **argv) {
   ip.SetBase("10.0.0.0", "255.255.255.0");
   Ipv4InterfaceContainer ifs = ip.Assign(devs);
 
-  // Traffic: UDP both directions + TCP both directions
+  // Traffic: UDP both directions + TCP both directions + IoT traffic
+  // Timing strategy: Stagger traffic types to create varied network conditions
   const uint16_t udpPortA = 5000;
   const uint16_t udpPortB = 5001;
   const uint16_t tcpPortA = 6000;
   const uint16_t tcpPortB = 6001;
-  // UDP sinks and clients
+  
+  // UDP sinks and clients - Start early to establish baseline
   UdpServerHelper udpSinkA(udpPortA);
   UdpServerHelper udpSinkB(udpPortB);
   ApplicationContainer udpSinks;
   udpSinks.Add(udpSinkA.Install(nodes.Get(nNodes - 1)));
   udpSinks.Add(udpSinkB.Install(nodes.Get(0)));
-  udpSinks.Start(Seconds(1.0));
+  udpSinks.Start(Seconds(1.0));  // Start sinks early
   udpSinks.Stop(Seconds(10.0));
 
+  // UDP Client A: Sayed -> Sadia (starts at 1.5s with random delay)
   OnOffHelper udpClientA("ns3::UdpSocketFactory", InetSocketAddress(ifs.GetAddress(nNodes - 1), udpPortA));
   udpClientA.SetConstantRate(DataRate("4Mbps"), 1200);
-  udpClientA.SetAttribute("StartTime", TimeValue(Seconds(2.0)));
+  udpClientA.SetAttribute("StartTime", TimeValue(Seconds(1.5)));  // Earlier start
   udpClientA.SetAttribute("StopTime", TimeValue(Seconds(10.0)));
   ApplicationContainer a1 = udpClientA.Install(nodes.Get(0));
 
+  // UDP Client B: Sadia -> Sayed (starts at 2.0s with random delay)
   OnOffHelper udpClientB("ns3::UdpSocketFactory", InetSocketAddress(ifs.GetAddress(0), udpPortB));
   udpClientB.SetConstantRate(DataRate("4Mbps"), 1200);
-  udpClientB.SetAttribute("StartTime", TimeValue(Seconds(2.5)));
+  udpClientB.SetAttribute("StartTime", TimeValue(Seconds(2.0)));  // Earlier start
   udpClientB.SetAttribute("StopTime", TimeValue(Seconds(10.0)));
   ApplicationContainer a2 = udpClientB.Install(nodes.Get(nNodes - 1));
 
-  // TCP sinks and clients
+  // TCP sinks and clients - Start after UDP to create layered traffic
   PacketSinkHelper tcpSinkA("ns3::TcpSocketFactory",
                             InetSocketAddress(Ipv4Address::GetAny(), tcpPortA));
   PacketSinkHelper tcpSinkB("ns3::TcpSocketFactory",
@@ -272,36 +322,53 @@ int main(int argc, char **argv) {
   ApplicationContainer tcpSinks;
   tcpSinks.Add(tcpSinkA.Install(nodes.Get(nNodes - 1)));
   tcpSinks.Add(tcpSinkB.Install(nodes.Get(0)));
-  tcpSinks.Start(Seconds(1.0));
+  tcpSinks.Start(Seconds(1.0));  // Start sinks early
   tcpSinks.Stop(Seconds(10.0));
 
-  // TCP bulk both ways (cap rate to avoid instant saturation)
+  // TCP bulk both ways - Start after UDP to create traffic layering
+  // TCP A: Sayed -> Sadia (starts at 2.5s)
   BulkSendHelper tcpA("ns3::TcpSocketFactory",
                       InetSocketAddress(ifs.GetAddress(nNodes - 1), tcpPortA));
   tcpA.SetAttribute("MaxBytes", UintegerValue(0)); // unlimited
   ApplicationContainer tA = tcpA.Install(nodes.Get(0));
-  tA.Start(Seconds(3.0));
+  tA.Start(Seconds(2.5));  // Earlier start, after UDP
   tA.Stop(Seconds(10.0));
 
+  // TCP B: Sadia -> Sayed (starts at 3.0s)
   BulkSendHelper tcpB("ns3::TcpSocketFactory",
                       InetSocketAddress(ifs.GetAddress(0), tcpPortB));
   tcpB.SetAttribute("MaxBytes", UintegerValue(0));
   ApplicationContainer tB = tcpB.Install(nodes.Get(nNodes - 1));
-  tB.Start(Seconds(3.5));
+  tB.Start(Seconds(3.0));  // Earlier start, after TCP A
   tB.Stop(Seconds(10.0));
 
-  // Small IoT-like UDP bursts
+  // IoT-like UDP bursts - Start much earlier with varied timing
+  // Each IoT device (nodes 1-8) sends data to Sayed with different patterns
   for (uint32_t i = 1; i < nNodes - 1; ++i) {
+    // IoT Client: Each device sends to Sayed with unique port (7001-7008)
     UdpClientHelper iotToSayed(ifs.GetAddress(0), 7000 + i);
     iotToSayed.SetAttribute("MaxPackets", UintegerValue(200));
-    iotToSayed.SetAttribute("Interval", TimeValue(Seconds(2.0)));
+    iotToSayed.SetAttribute("Interval", TimeValue(Seconds(1.5)));  // More frequent than before
     iotToSayed.SetAttribute("PacketSize", UintegerValue(100));
     ApplicationContainer c1 = iotToSayed.Install(nodes.Get(i));
-    c1.Start(Seconds(5.0 + 0.1 * i));
+    
+    // Staggered start times: Group 1 (1-3) starts at 1.8s, Group 2 (4-6) at 2.2s, Group 3 (7-8) at 2.6s
+    double startTime;
+    if (i <= 3) {
+      startTime = 1.8 + 0.1 * (i - 1);  // Group 1: 1.8s, 1.9s, 2.0s
+    } else if (i <= 6) {
+      startTime = 2.2 + 0.1 * (i - 4);  // Group 2: 2.2s, 2.3s, 2.4s
+    } else {
+      startTime = 2.6 + 0.1 * (i - 7);  // Group 3: 2.6s, 2.7s
+    }
+    
+    c1.Start(Seconds(startTime));  // Much earlier start
     c1.Stop(Seconds(10.0));
+    
+    // IoT Server: Sayed receives from each IoT device
     UdpServerHelper iotSinkSayed(7000 + i);
     ApplicationContainer s1 = iotSinkSayed.Install(nodes.Get(0));
-    s1.Start(Seconds(1.0));
+    s1.Start(Seconds(1.0));  // Start server early
     s1.Stop(Seconds(10.0));
   }
 
@@ -311,7 +378,7 @@ int main(int argc, char **argv) {
 
   // NetAnim: label ends
   AnimationInterface anim(
-      "wifi_mesh_outputs/netanim-wifi-mesh-playfield-rw.xml");
+      kOutDir + "/" + kNetAnimFile);
   anim.EnablePacketMetadata(true);
   anim.UpdateNodeDescription(nodes.Get(0), "Sayed");
   anim.UpdateNodeColor(nodes.Get(0), 0, 150, 255);
@@ -322,14 +389,14 @@ int main(int argc, char **argv) {
   // IPv4 L3 ASCII tracing (emit packets at IP layer to ASCII file)
   {
     AsciiTraceHelper ascii;
-    Ptr<OutputStreamWrapper> ipStream = ascii.CreateFileStream("wifi_mesh_outputs/ipv4-l3.tr");
+    Ptr<OutputStreamWrapper> ipStream = ascii.CreateFileStream(kOutDir + "/ipv4-l3.tr");
     internet.EnableAsciiIpv4All(ipStream);
   }
 
   Simulator::Stop(Seconds(10.0));
   Simulator::Run();
   monitor->SerializeToXmlFile(
-      "wifi_mesh_outputs/flowmon-wifi-mesh-playfield-rw.xml", true, true);
+      kOutDir + "/" + kFlowmonFile, true, true);
   Simulator::Destroy();
   return 0;
 }

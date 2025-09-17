@@ -8,13 +8,124 @@
 #include "ns3/netanim-module.h"
 #include "ns3/network-module.h"
 #include "ns3/point-to-point-module.h"
+#include "ns3/trace-helper.h"
+#include <iostream>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
 
 using namespace ns3;
 
+static const std::string kOutDir = "Lte_outputs";
+
+// Output file name constants for easy configuration
+static const std::string kPcapPrefix = "lte_playfield_rw_pcap";
+static const std::string kAsciiTracesPrefix = "lte_playfield_ascii_traces";
+static const std::string kNetAnimFile = "netanim-lte-playfield-rw.xml";
+static const std::string kFlowmonFile = "flowmon-lte-playfield-rw.xml";
+
+// Write an ASCII grid of node and building positions to Lte_outputs/position_grid.txt
+static void WriteAsciiPositionGrid(const NodeContainer &nodes,
+                                   const BuildingContainer &buildings,
+                                   double fieldMeters,
+                                   double cellMeters = 10.0,
+                                   const std::string &outDir = kOutDir,
+                                   const std::string &outName = "position_grid.txt") {
+  const double fieldMin = 0.0;
+  const double fieldMax = fieldMeters;
+  const int W = static_cast<int>((fieldMax - fieldMin) / cellMeters) + 1;
+  const int H = W;
+
+  std::vector<std::string> grid(H, std::string(W, '.'));
+
+  // Mark buildings as '#'
+  for (uint32_t b = 0; b < buildings.GetN(); ++b) {
+    Ptr<Building> bd = buildings.Get(b);
+    Box bx = bd->GetBoundaries();
+    int x0 = std::max(0, static_cast<int>(std::floor((bx.xMin - fieldMin) / cellMeters)));
+    int x1 = std::min(W - 1, static_cast<int>(std::floor((bx.xMax - fieldMin) / cellMeters)));
+    int y0 = std::max(0, static_cast<int>(std::floor((bx.yMin - fieldMin) / cellMeters)));
+    int y1 = std::min(H - 1, static_cast<int>(std::floor((bx.yMax - fieldMin) / cellMeters)));
+    for (int gy = y0; gy <= y1; ++gy) {
+      for (int gx = x0; gx <= x1; ++gx) {
+        grid[H - 1 - gy][gx] = '#';
+      }
+    }
+  }
+
+  auto nodeChar = [&](uint32_t i) -> char {
+    if (i == 0) return 'S';
+    if (i + 1 == nodes.GetN()) return 'D';
+    if (i < 10) return static_cast<char>('0' + static_cast<int>(i));
+    return static_cast<char>('a' + static_cast<int>(i - 10));
+  };
+
+  // Overlay node markers
+  for (uint32_t i = 0; i < nodes.GetN(); ++i) {
+    Ptr<MobilityModel> mm = nodes.Get(i)->GetObject<MobilityModel>();
+    if (!mm) continue;
+    Vector p = mm->GetPosition();
+    int gx = static_cast<int>(std::round((p.x - fieldMin) / cellMeters));
+    int gy = static_cast<int>(std::round((p.y - fieldMin) / cellMeters));
+    if (gx < 0 || gx >= W || gy < 0 || gy >= H) continue;
+    grid[H - 1 - gy][gx] = nodeChar(i);
+  }
+
+  std::system(("mkdir -p " + outDir).c_str());
+  std::ofstream ofs(outDir + "/" + outName);
+  ofs << "Grid " << W << "x" << H << " (cell=" << cellMeters << "m). Top=+Y, Right=+X\n";
+  ofs << "Legend: '.'=free, '#'=building, 'S'=Sayed(0), 'D'=Sadia(" << (nodes.GetN() - 1)
+      << "), digits/letters=other UEs\n\n";
+
+  // X-axis header every 5 cells (label in tens of meters modulo 100)
+  ofs << "     ";
+  for (int gx = 0; gx < W; ++gx) {
+    if (gx % 5 == 0) {
+      ofs << std::setw(2) << std::setfill(' ') << ((gx * static_cast<int>(cellMeters)) / 10 % 100);
+    } else {
+      ofs << " ";
+    }
+  }
+  ofs << "\n";
+
+  for (int gy = 0; gy < H; ++gy) {
+    int yMeters = static_cast<int>((H - 1 - gy) * cellMeters);
+    ofs << std::setw(4) << yMeters << " " << grid[gy] << "\n";
+  }
+
+  ofs << "\nNodes:\n";
+  for (uint32_t i = 0; i < nodes.GetN(); ++i) {
+    Ptr<MobilityModel> mm = nodes.Get(i)->GetObject<MobilityModel>();
+    if (!mm) continue;
+    Vector p = mm->GetPosition();
+    std::string name = (i == 0 ? "Sayed" : (i + 1 == nodes.GetN() ? "Sadia" : ("UE" + std::to_string(i))));
+    ofs << " - " << std::setw(6) << name << " (node " << i << "): ("
+        << std::fixed << std::setprecision(1) << p.x << ", " << p.y << ")\n";
+  }
+
+  ofs << "\nBuildings (xMin..xMax, yMin..yMax):\n";
+  for (uint32_t b = 0; b < buildings.GetN(); ++b) {
+    Box bx = buildings.Get(b)->GetBoundaries();
+    ofs << " - B" << b << ": x[" << bx.xMin << "," << bx.xMax << "], y[" << bx.yMin << "," << bx.yMax << "]\n";
+  }
+  ofs.close();
+}
+
 int main(int argc, char **argv) {
+  // Basics
   PacketMetadata::Enable();
   Packet::EnablePrinting();
+  // LogComponentEnable("OnOffApplication", LOG_LEVEL_DEBUG);
+  //   LogComponentEnable("PacketSink", LOG_LEVEL_DEBUG);
+  //   LogComponentEnable("UdpEchoClientApplication", LOG_LEVEL_DEBUG);
+  //   LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_DEBUG);
+  //   // TCP logging
+  //   LogComponentEnable("BulkSendApplication", LOG_LEVEL_DEBUG);
+    LogComponentEnable("TcpSocketBase", LOG_LEVEL_DEBUG);
+  //   LogComponentEnable("TcpL4Protocol", LOG_LEVEL_DEBUG);
+  // UDP logging (disabled when UDP traffic is commented out)
+  LogComponentEnable("UdpServer", LOG_LEVEL_INFO);
 
   const uint32_t nUes = 10; // nodes 0..9; 0 and 9 are endpoints
   const double field = 400.0;
@@ -30,8 +141,8 @@ int main(int argc, char **argv) {
   MobilityHelper fixedMob;
   MobilityHelper midMob;
   Ptr<ListPositionAllocator> fixedPos = CreateObject<ListPositionAllocator>();
-  fixedPos->Add(Vector(0.0, 0.0, 0.0));     // UE 0: Sayed
-  fixedPos->Add(Vector(field, field, 0.0)); // UE 9: Sadia
+  fixedPos->Add(Vector(0.0, 0.0, 1.5));     // UE 0: Sayed
+  fixedPos->Add(Vector(field, field, 1.5)); // UE 9: Sadia
   fixedMob.SetPositionAllocator(fixedPos);
   fixedMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
   fixedMob.Install(ueNodes.Get(0));
@@ -42,14 +153,14 @@ int main(int argc, char **argv) {
     double frac = static_cast<double>(i) / static_cast<double>(nUes - 1);
     double x = frac * field;
     double y = frac * field;
-    midPos->Add(Vector(x, y, 0.0));
+    midPos->Add(Vector(x, y, 1.5));
   }
   midMob.SetPositionAllocator(midPos);
   midMob.SetMobilityModel(
       "ns3::RandomWalk2dMobilityModel", "Bounds",
       RectangleValue(Rectangle(0, 400, 0, 400)), "Time",
       TimeValue(Seconds(0.5)), "Speed",
-      StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
+      StringValue("ns3::ConstantRandomVariable[Constant=5.0]"));
   NodeContainer mids;
   for (uint32_t i = 1; i < nUes - 1; ++i) {
     mids.Add(ueNodes.Get(i));
@@ -92,6 +203,9 @@ int main(int argc, char **argv) {
   BuildingsHelper::Install(ueNodes);
   BuildingsHelper::Install(enbNodes);
 
+  // Emit an ASCII map of positions and obstacles before simulation starts
+  WriteAsciiPositionGrid(ueNodes, buildings, field);
+
   // Lower transmit powers so coverage is just enough
   Config::SetDefault("ns3::LteEnbPhy::TxPower", DoubleValue(16.0)); // dBm
   Config::SetDefault("ns3::LteUePhy::TxPower", DoubleValue(10.0));  // dBm
@@ -131,7 +245,7 @@ int main(int argc, char **argv) {
   }
 
   // Ensure outputs directory exists
-  std::system("mkdir -p Lte_outputs");
+  std::system(("mkdir -p " + kOutDir).c_str());
 
   // Create Remote Host to hook PGW and generate pcap/ascii on core link
   Ptr<Node> pgw = epcHelper->GetPgwNode();
@@ -178,10 +292,10 @@ int main(int argc, char **argv) {
       epcHelper->GetUeDefaultGatewayAddress(), 1);
 
   // Enable pcap and ascii traces on EPC P2P link with requested prefix
-  p2ph.EnablePcapAll("Lte_outputs/tr-epc");
+  p2ph.EnablePcapAll(kOutDir + "/" + kPcapPrefix, true);
   AsciiTraceHelper ascii;
   Ptr<OutputStreamWrapper> stream =
-      ascii.CreateFileStream("Lte_outputs/tr-epc.tr");
+      ascii.CreateFileStream(kOutDir + "/" + kAsciiTracesPrefix + ".tr");
   p2ph.EnableAsciiAll(stream);
 
   // Applications: replicate Wi-Fi case between UE 0 and UE 9
@@ -263,7 +377,7 @@ int main(int argc, char **argv) {
   Ptr<FlowMonitor> monitor = fm.InstallAll();
 
   // NetAnim
-  AnimationInterface anim("Lte_outputs/tr-netanim-lte-playfield.xml");
+  AnimationInterface anim(kOutDir + "/" + kNetAnimFile);
   anim.SetMaxPktsPerTraceFile(
       500000); // Increase packet limit to avoid warnings
   anim.EnablePacketMetadata(true);
@@ -286,10 +400,17 @@ int main(int argc, char **argv) {
   anim.UpdateNodeDescription(sgw, "SGW");
   anim.UpdateNodeColor(sgw, 255, 0, 255); // Magenta
 
+  // IPv4 L3 ASCII tracing (emit packets at IP layer to ASCII file)
+  {
+    AsciiTraceHelper ascii;
+    Ptr<OutputStreamWrapper> ipStream = ascii.CreateFileStream(kOutDir + "/ipv4-l3.tr");
+    internet.EnableAsciiIpv4All(ipStream);
+  }
+
   Simulator::Stop(Seconds(simStop));
   Simulator::Run();
-  monitor->SerializeToXmlFile("Lte_outputs/tr-flowmon-lte-playfield.xml", true,
-                              true);
+  monitor->SerializeToXmlFile(
+      kOutDir + "/" + kFlowmonFile, true, true);
   Simulator::Destroy();
   return 0;
 }

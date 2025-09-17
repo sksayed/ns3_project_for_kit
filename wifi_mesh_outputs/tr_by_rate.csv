@@ -1,2 +1,9 @@
 rate,frames
-OfdmRate6Mbps,151
+OfdmRate6Mbps,11732
+OfdmRate54Mbps,7536
+OfdmRate36Mbps,4992
+OfdmRate48Mbps,3020
+OfdmRate9Mbps,2728
+OfdmRate12Mbps,2701
+OfdmRate18Mbps,2685
+OfdmRate24Mbps,2556
