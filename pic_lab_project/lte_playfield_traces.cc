@@ -19,6 +19,14 @@ using namespace ns3;
 
 static const std::string kOutDir = "Lte_outputs";
 
+// Function to update building position dynamically
+void UpdateBuildingPosition(Ptr<Building> building, Vector newPosition, double width, double height) {
+    Box newBounds(newPosition.x, newPosition.x + width, 
+                  newPosition.y, newPosition.y + height, 0.0, 10.0);
+    building->SetBoundaries(newBounds);
+    std::cout << "Building moved to (" << newPosition.x << ", " << newPosition.y << ")" << std::endl;
+}
+
 // Output file name constants for easy configuration
 static const std::string kPcapPrefix = "lte_playfield_rw_pcap";
 static const std::string kAsciiTracesPrefix = "lte_playfield_ascii_traces";
@@ -186,11 +194,11 @@ int main(int argc, char **argv) {
   Ptr<Building> rightAbove = CreateObject<Building>();
   rightAbove->SetBoundaries(Box(340.0, 400.0, 296.0, 304.0, 0.0, 10.0));
   Ptr<Building> cluster250a = CreateObject<Building>();
-  cluster250a->SetBoundaries(Box(110.0, 170.0, 246.0, 254.0, 0.0, 10.0));
+  cluster250a->SetBoundaries(Box(80.0, 140.0, 220.0, 228.0, 0.0, 15.0));  // Moved left, higher
   Ptr<Building> cluster250b = CreateObject<Building>();
-  cluster250b->SetBoundaries(Box(200.0, 280.0, 246.0, 254.0, 0.0, 10.0));
+  cluster250b->SetBoundaries(Box(170.0, 250.0, 220.0, 228.0, 0.0, 12.0));  // Moved left, different height
   Ptr<Building> cluster50 = CreateObject<Building>();
-  cluster50->SetBoundaries(Box(300.0, 380.0, 46.0, 54.0, 0.0, 10.0));
+  cluster50->SetBoundaries(Box(255.0, 335.0, 20.0, 28.0, 0.0, 18.0));  // Moved 15m more left, tallest building
   BuildingContainer buildings;
   buildings.Add(leftBelow);
   buildings.Add(rightBelow);
@@ -202,6 +210,29 @@ int main(int argc, char **argv) {
 
   BuildingsHelper::Install(ueNodes);
   BuildingsHelper::Install(enbNodes);
+  
+  // Schedule building movements during simulation
+  std::cout << "Scheduling building movements..." << std::endl;
+  
+  // Move cluster250a building at different times (moved left, higher)
+  Simulator::Schedule(Seconds(5.0), &UpdateBuildingPosition, cluster250a, 
+                     Vector(150.0, 180.0, 0.0), 60.0, 8.0);
+  Simulator::Schedule(Seconds(8.0), &UpdateBuildingPosition, cluster250a, 
+                     Vector(250.0, 130.0, 0.0), 60.0, 8.0);
+  Simulator::Schedule(Seconds(12.0), &UpdateBuildingPosition, cluster250a, 
+                     Vector(100.0, 280.0, 0.0), 60.0, 8.0);
+  
+  // Move cluster250b building (moved left)
+  Simulator::Schedule(Seconds(6.0), &UpdateBuildingPosition, cluster250b, 
+                     Vector(200.0, 180.0, 0.0), 80.0, 8.0);
+  Simulator::Schedule(Seconds(10.0), &UpdateBuildingPosition, cluster250b, 
+                     Vector(130.0, 300.0, 0.0), 80.0, 8.0);
+  
+  // Move cluster50 building (moved 15m more left)
+  Simulator::Schedule(Seconds(7.0), &UpdateBuildingPosition, cluster50, 
+                     Vector(255.0, 80.0, 0.0), 80.0, 8.0);
+  Simulator::Schedule(Seconds(11.0), &UpdateBuildingPosition, cluster50, 
+                     Vector(215.0, 180.0, 0.0), 80.0, 8.0);
 
   // Emit an ASCII map of positions and obstacles before simulation starts
   WriteAsciiPositionGrid(ueNodes, buildings, field);
