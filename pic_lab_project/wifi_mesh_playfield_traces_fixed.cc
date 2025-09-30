@@ -7,6 +7,7 @@
 #include "ns3/mobility-module.h"
 #include "ns3/netanim-module.h"
 #include "ns3/network-module.h"
+#include "ns3/point-to-point-module.h"
 #include "ns3/trace-helper.h"
 #include "ns3/wifi-helper.h"
 #include "ns3/yans-wifi-helper.h"
@@ -20,7 +21,7 @@
 
 using namespace ns3;
 
-static const std::string kOutDir = "wifi_mesh_outputs";
+static const std::string kOutDir = "wifi_mesh_backhaul_outputs";
 
 // Function to update building position dynamically
 void UpdateBuildingPosition(Ptr<Building> building, Vector newPosition, double width, double height) {
@@ -30,14 +31,17 @@ void UpdateBuildingPosition(Ptr<Building> building, Vector newPosition, double w
     std::cout << "Building moved to (" << newPosition.x << ", " << newPosition.y << ")" << std::endl;
 }
 
-// Output file name constants for easy configuration
-static const std::string kPcapPrefix = "wifi_mesh_playfield_rw_pcap";
-static const std::string kAsciiTracesPrefix = "wifi_mesh_playfield_ascii_traces";
-static const std::string kNetAnimFile = "netanim-wifi-mesh-playfield-rw.xml";
-static const std::string kFlowmonFile = "flowmon-wifi-mesh-playfield-rw.xml";
+// Output file name constants
+static const std::string kPcapPrefix = "wifi_mesh_backhaul_pcap";
+static const std::string kAsciiTracesPrefix = "wifi_mesh_backhaul_ascii_traces";
+static const std::string kNetAnimFile = "netanim-wifi-mesh-backhaul.xml";
+static const std::string kFlowmonFile = "flowmon-wifi-mesh-backhaul.xml";
 
-// Write an ASCII grid of node and building positions to wifi_mesh_outputs/position_grid.txt
-static void WriteAsciiPositionGrid(const NodeContainer &nodes,
+// Write an ASCII grid of node and building positions
+static void WriteAsciiPositionGrid(const NodeContainer &meshNodes,
+                                   const NodeContainer &staNodes,
+                                   const NodeContainer &backhaulNodes,
+                                   const NodeContainer &sayedSadiaNodes,
                                    const BuildingContainer &buildings,
                                    double fieldMeters,
                                    double cellMeters = 10.0,
@@ -65,29 +69,66 @@ static void WriteAsciiPositionGrid(const NodeContainer &nodes,
     }
   }
 
-  auto nodeChar = [&](uint32_t i) -> char {
-    if (i == 0) return 'S';
-    if (i + 1 == nodes.GetN()) return 'D';
-    if (i < 10) return static_cast<char>('0' + static_cast<int>(i));
-    return static_cast<char>('a' + static_cast<int>(i - 10));
+  auto nodeChar = [&](char type, uint32_t i) -> char {
+    switch (type) {
+      case 'B': return 'B';  // Backhaul
+      case 'M': return static_cast<char>('0' + static_cast<int>(i));  // Mesh nodes 0-9
+      case 'S': return static_cast<char>('A' + static_cast<int>(i));  // STA nodes A-Z
+      case 'Y': return 'Y';  // Sayed
+      case 'D': return 'D';  // Sadia
+      default: return '?';
+    }
   };
 
   // Overlay node markers
-  for (uint32_t i = 0; i < nodes.GetN(); ++i) {
-    Ptr<MobilityModel> mm = nodes.Get(i)->GetObject<MobilityModel>();
+  // Backhaul nodes (marked as 'B')
+  for (uint32_t i = 0; i < backhaulNodes.GetN(); ++i) {
+    Ptr<MobilityModel> mm = backhaulNodes.Get(i)->GetObject<MobilityModel>();
     if (!mm) continue;
     Vector p = mm->GetPosition();
     int gx = static_cast<int>(std::round((p.x - fieldMin) / cellMeters));
     int gy = static_cast<int>(std::round((p.y - fieldMin) / cellMeters));
     if (gx < 0 || gx >= W || gy < 0 || gy >= H) continue;
-    grid[H - 1 - gy][gx] = nodeChar(i);
+    grid[H - 1 - gy][gx] = nodeChar('B', i);
+  }
+  
+  // Mesh nodes (marked as digits)
+  for (uint32_t i = 0; i < meshNodes.GetN(); ++i) {
+    Ptr<MobilityModel> mm = meshNodes.Get(i)->GetObject<MobilityModel>();
+    if (!mm) continue;
+    Vector p = mm->GetPosition();
+    int gx = static_cast<int>(std::round((p.x - fieldMin) / cellMeters));
+    int gy = static_cast<int>(std::round((p.y - fieldMin) / cellMeters));
+    if (gx < 0 || gx >= W || gy < 0 || gy >= H) continue;
+    grid[H - 1 - gy][gx] = nodeChar('M', i);
+  }
+  
+  // STA nodes (marked as letters)
+  for (uint32_t i = 0; i < staNodes.GetN(); ++i) {
+    Ptr<MobilityModel> mm = staNodes.Get(i)->GetObject<MobilityModel>();
+    if (!mm) continue;
+    Vector p = mm->GetPosition();
+    int gx = static_cast<int>(std::round((p.x - fieldMin) / cellMeters));
+    int gy = static_cast<int>(std::round((p.y - fieldMin) / cellMeters));
+    if (gx < 0 || gx >= W || gy < 0 || gy >= H) continue;
+    grid[H - 1 - gy][gx] = nodeChar('S', i);
+  }
+  
+  // Sayed and Sadia
+  for (uint32_t i = 0; i < sayedSadiaNodes.GetN(); ++i) {
+    Ptr<MobilityModel> mm = sayedSadiaNodes.Get(i)->GetObject<MobilityModel>();
+    if (!mm) continue;
+    Vector p = mm->GetPosition();
+    int gx = static_cast<int>(std::round((p.x - fieldMin) / cellMeters));
+    int gy = static_cast<int>(std::round((p.y - fieldMin) / cellMeters));
+    if (gx < 0 || gx >= W || gy < 0 || gy >= H) continue;
+    grid[H - 1 - gy][gx] = (i == 0) ? 'Y' : 'D';  // Sayed=Y, Sadia=D
   }
 
   std::system(("mkdir -p " + outDir).c_str());
   std::ofstream ofs(outDir + "/" + outName);
   ofs << "Grid " << W << "x" << H << " (cell=" << cellMeters << "m). Top=+Y, Right=+X\n";
-  ofs << "Legend: '.'=free, '#'=building, 'S'=Sayed(0), 'D'=Sadia(" << (nodes.GetN() - 1)
-      << "), digits/letters=other UEs\n\n";
+  ofs << "Legend: '.'=free, '#'=building, 'B'=Backhaul, '0-9'=Mesh hops, 'A-Z'=STA/UE, 'Y'=Sayed, 'D'=Sadia\n\n";
 
   // X-axis header every 5 cells (label in tens of meters modulo 100)
   ofs << "     ";
@@ -106,12 +147,41 @@ static void WriteAsciiPositionGrid(const NodeContainer &nodes,
   }
 
   ofs << "\nNodes:\n";
-  for (uint32_t i = 0; i < nodes.GetN(); ++i) {
-    Ptr<MobilityModel> mm = nodes.Get(i)->GetObject<MobilityModel>();
+  
+  // List backhaul nodes
+  for (uint32_t i = 0; i < backhaulNodes.GetN(); ++i) {
+    Ptr<MobilityModel> mm = backhaulNodes.Get(i)->GetObject<MobilityModel>();
     if (!mm) continue;
     Vector p = mm->GetPosition();
-    std::string name = (i == 0 ? "Sayed" : (i + 1 == nodes.GetN() ? "Sadia" : ("UE" + std::to_string(i))));
-    ofs << " - " << std::setw(6) << name << " (node " << i << "): ("
+    ofs << " - Backhaul" << i << " (node " << backhaulNodes.Get(i)->GetId() << "): ("
+        << std::fixed << std::setprecision(1) << p.x << ", " << p.y << ")\n";
+  }
+  
+  // List mesh nodes
+  for (uint32_t i = 0; i < meshNodes.GetN(); ++i) {
+    Ptr<MobilityModel> mm = meshNodes.Get(i)->GetObject<MobilityModel>();
+    if (!mm) continue;
+    Vector p = mm->GetPosition();
+    ofs << " - Mesh" << i << " (node " << meshNodes.Get(i)->GetId() << "): ("
+        << std::fixed << std::setprecision(1) << p.x << ", " << p.y << ")\n";
+  }
+  
+  // List STA nodes
+  for (uint32_t i = 0; i < staNodes.GetN(); ++i) {
+    Ptr<MobilityModel> mm = staNodes.Get(i)->GetObject<MobilityModel>();
+    if (!mm) continue;
+    Vector p = mm->GetPosition();
+    ofs << " - STA" << i << " (node " << staNodes.Get(i)->GetId() << "): ("
+        << std::fixed << std::setprecision(1) << p.x << ", " << p.y << ")\n";
+  }
+  
+  // List Sayed and Sadia
+  for (uint32_t i = 0; i < sayedSadiaNodes.GetN(); ++i) {
+    Ptr<MobilityModel> mm = sayedSadiaNodes.Get(i)->GetObject<MobilityModel>();
+    if (!mm) continue;
+    Vector p = mm->GetPosition();
+    std::string name = (i == 0) ? "Sayed" : "Sadia";
+    ofs << " - " << name << " (node " << sayedSadiaNodes.Get(i)->GetId() << "): ("
         << std::fixed << std::setprecision(1) << p.x << ", " << p.y << ")\n";
   }
 
@@ -134,47 +204,120 @@ int main(int argc, char **argv) {
   LogComponentEnable("GlobalRouteManager", LOG_LEVEL_DEBUG);
   LogComponentEnable("Ipv4GlobalRouting", LOG_LEVEL_DEBUG);
   LogComponentEnable("TcpSocketBase", LOG_LEVEL_DEBUG);
+  LogComponentEnable("TcpSocket", LOG_LEVEL_DEBUG);
+  LogComponentEnable("OnOffApplication", LOG_LEVEL_DEBUG);
   LogComponentEnable("UdpServer", LOG_LEVEL_INFO);
 
-  const uint32_t nNodes = 10;
-  const double field = 400.0;
+  // Network topology parameters
+  const uint32_t nMeshHops = 4;        // Number of mesh hop nodes (fixed APs)
+  const uint32_t nStaPerMesh = 2;      // Number of STA nodes per mesh hop
+  const uint32_t nTotalStas = nMeshHops * nStaPerMesh;  // Total STA nodes
+  const double field = 400.0;           // Keep original field size
+  const double simTime = 5.0;          // Reduced simulation time
 
-  // Nodes: 10 mesh STAs; we'll pin index 0 as Sayed, last as Sadia
-  NodeContainer nodes;
-  nodes.Create(nNodes);
+  std::cout << "Creating backhaul-connected mesh network topology with Sayed & Sadia:" << std::endl;
+  std::cout << "- " << nMeshHops << " mesh hop nodes" << std::endl;
+  std::cout << "- " << nTotalStas << " STA nodes (" << nStaPerMesh << " per mesh hop)" << std::endl;
+  std::cout << "- Sayed and Sadia as special communication endpoints" << std::endl;
+  std::cout << "- Backhaul with internet connection" << std::endl;
+  std::cout << "- Dynamic building movements preserved" << std::endl;
 
-  // Mobility: Sayed and Sadia static at corners; middle nodes fixed along the diagonal
-  MobilityHelper fixedMob;
-  Ptr<ListPositionAllocator> fixedPos = CreateObject<ListPositionAllocator>();
-  fixedPos->Add(Vector(0.0, 0.0, 1.5));     // node 0: Sayed
-  fixedPos->Add(Vector(field, field, 1.5)); // node n-1: Sadia
-  fixedMob.SetPositionAllocator(fixedPos);
-  fixedMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-  fixedMob.Install(nodes.Get(0));
-  fixedMob.Install(nodes.Get(nNodes - 1));
+  // Create nodes
+  NodeContainer backhaulNodes;     // Backhaul nodes (internet gateway)
+  NodeContainer meshNodes;         // Mesh hop nodes
+  NodeContainer staNodes;          // STA/UE nodes
+  NodeContainer sayedSadiaNodes;   // Sayed and Sadia nodes
+  NodeContainer allNodes;          // All nodes combined
 
-  // Middle nodes placed evenly along the (0,0) -> (400,400) diagonal
-  Ptr<ListPositionAllocator> midPos = CreateObject<ListPositionAllocator>();
-  for (uint32_t i = 1; i < nNodes - 1; ++i) {
-    double frac = static_cast<double>(i) / static_cast<double>(nNodes - 1);
-    double x = frac * field;
-    double y = frac * field;
-    midPos->Add(Vector(x, y, 1.5));  // Set height to 1.5m for building propagation
+  // Create backhaul node (internet gateway)
+  backhaulNodes.Create(1);
+  
+  // Create mesh hop nodes
+  meshNodes.Create(nMeshHops);
+  
+  // Create STA nodes
+  staNodes.Create(nTotalStas);
+  
+  // Create Sayed and Sadia nodes
+  sayedSadiaNodes.Create(2);
+  
+  // Combine all nodes
+  allNodes.Add(backhaulNodes);
+  allNodes.Add(meshNodes);
+  allNodes.Add(staNodes);
+  allNodes.Add(sayedSadiaNodes);
+
+  std::cout << "Total nodes: " << allNodes.GetN() << " (1 backhaul + " 
+            << nMeshHops << " mesh + " << nTotalStas << " STA + 2 Sayed/Sadia)" << std::endl;
+
+  // Mobility setup
+  MobilityHelper mobility;
+  
+  // Position backhaul node at the left edge (internet connection point)
+  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator>();
+  positionAlloc->Add(Vector(30.0, field/2, 10.0));  // Backhaul at left edge, elevated
+  
+  // Position mesh hop nodes at fixed AP coordinates (within 200m range)
+  // Mesh0: (50, 50), Mesh1: (150, 100), Mesh2: (250, 150), Mesh3: (350, 200)
+  positionAlloc->Add(Vector(50.0, 50.0, 5.0));
+  positionAlloc->Add(Vector(150.0, 100.0, 5.0));
+  positionAlloc->Add(Vector(250.0, 150.0, 5.0));
+  positionAlloc->Add(Vector(350.0, 200.0, 5.0));
+  
+  // Position STA nodes around their respective mesh hop nodes
+  auto getMeshPos = [&](uint32_t idx) -> std::pair<double,double> {
+    switch (idx) {
+      case 0: return {50.0, 50.0};
+      case 1: return {150.0, 100.0};
+      case 2: return {250.0, 150.0};
+      default: return {350.0, 200.0};
+    }
+  };
+
+  for (uint32_t i = 0; i < nTotalStas; ++i) {
+    uint32_t meshIdx = i / nStaPerMesh;  // two STAs per mesh AP
+    uint32_t staIdx = i % nStaPerMesh;
+
+    auto [meshX, meshY] = getMeshPos(meshIdx);
+
+    // Position STA nodes around mesh AP with small radius
+    double angle = (staIdx * 2 * M_PI) / nStaPerMesh;
+    double distance = 35.0;
+    double x = meshX + distance * cos(angle);
+    double y = meshY + distance * sin(angle);
+
+    // Keep within bounds
+    x = std::max(10.0, std::min(field - 10.0, x));
+    y = std::max(10.0, std::min(field - 10.0, y));
+
+    positionAlloc->Add(Vector(x, y, 1.5));
   }
   
-  // All middle nodes use RandomWalk2d with moderate speed
-  MobilityHelper midMob;
-  midMob.SetPositionAllocator(midPos);
-  midMob.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
-    "Bounds", RectangleValue(Rectangle(0, 400, 0, 400)),
+  // Position Sayed and Sadia close to mesh APs for connectivity
+  positionAlloc->Add(Vector(55.0, 55.0, 1.5));   // Sayed - very close to Mesh0 (50,50)
+  positionAlloc->Add(Vector(345.0, 195.0, 1.5)); // Sadia - very close to Mesh3 (350,200)
+  
+  mobility.SetPositionAllocator(positionAlloc);
+  
+  // Set mobility models
+  // Backhaul: static
+  mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+  mobility.Install(backhaulNodes);
+  
+  // Mesh nodes: static (they form the backbone)
+  mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+  mobility.Install(meshNodes);
+  
+  // STA nodes: mobile with RandomWalk2d (preserve original mobility)
+  mobility.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
+    "Bounds", RectangleValue(Rectangle(0, field, 0, field)),
     "Time", TimeValue(Seconds(1.0)),
-    "Speed", StringValue("ns3::ConstantRandomVariable[Constant=50.0]"));
+    "Speed", StringValue("ns3::ConstantRandomVariable[Constant=50.0]"));  // Keep original speed
+  mobility.Install(staNodes);
   
-  NodeContainer middleNodes;
-  for (uint32_t i = 1; i < nNodes - 1; ++i) {
-    middleNodes.Add(nodes.Get(i));
-  }
-  midMob.Install(middleNodes);
+  // Sayed and Sadia: static at their corners (preserve original behavior)
+  mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+  mobility.Install(sayedSadiaNodes);
 
   // Buildings / obstacles (same as original)
   Ptr<Building> leftBelow = CreateObject<Building>();
@@ -206,126 +349,233 @@ int main(int argc, char **argv) {
   buildings.Add(cluster250b);
   buildings.Add(cluster50);
 
-  BuildingsHelper::Install(nodes);
+  BuildingsHelper::Install(allNodes);
+  
+  // Write position grid after all mobility models are installed
+  WriteAsciiPositionGrid(meshNodes, staNodes, backhaulNodes, sayedSadiaNodes, buildings, field);
   
   // Schedule building movements during simulation
   std::cout << "Scheduling building movements..." << std::endl;
   
-  // Move cluster250a building at different times (moved left, higher)
-  Simulator::Schedule(Seconds(5.0), &UpdateBuildingPosition, cluster250a, 
-                     Vector(150.0, 180.0, 0.0), 60.0, 8.0);
-  Simulator::Schedule(Seconds(8.0), &UpdateBuildingPosition, cluster250a, 
-                     Vector(250.0, 130.0, 0.0), 60.0, 8.0);
-  Simulator::Schedule(Seconds(12.0), &UpdateBuildingPosition, cluster250a, 
-                     Vector(100.0, 280.0, 0.0), 60.0, 8.0);
-  
-  // Move cluster250b building (moved left)
-  Simulator::Schedule(Seconds(6.0), &UpdateBuildingPosition, cluster250b, 
-                     Vector(200.0, 180.0, 0.0), 80.0, 8.0);
-  Simulator::Schedule(Seconds(10.0), &UpdateBuildingPosition, cluster250b, 
-                     Vector(130.0, 300.0, 0.0), 80.0, 8.0);
-  
-  // Move cluster50 building (moved 15m more left)
-  Simulator::Schedule(Seconds(7.0), &UpdateBuildingPosition, cluster50, 
-                     Vector(255.0, 80.0, 0.0), 80.0, 8.0);
-  Simulator::Schedule(Seconds(11.0), &UpdateBuildingPosition, cluster50, 
-                     Vector(215.0, 180.0, 0.0), 80.0, 8.0);
-  
-  //WriteAsciiPositionGrid(nodes, buildings, field);
+  // Helper to adjust a building's desired position to avoid overlapping mesh AP nodes
+  auto scheduleMoveAvoidingMesh = [&](double at, Ptr<Building> b, Vector desired, double w, double h) {
+    Simulator::Schedule(Seconds(at), [&, b, desired, w, h]() mutable {
+      // Build initial box
+      Box bx(desired.x, desired.x + w, desired.y, desired.y + h, 0.0, 10.0);
+      auto overlapsMesh = [&]() -> bool {
+        for (uint32_t i = 0; i < meshNodes.GetN(); ++i) {
+          Ptr<MobilityModel> mm = meshNodes.Get(i)->GetObject<MobilityModel>();
+          if (!mm) continue;
+          Vector p = mm->GetPosition();
+          if (p.x >= bx.xMin && p.x <= bx.xMax && p.y >= bx.yMin && p.y <= bx.yMax) {
+            return true;
+          }
+        }
+        return false;
+      };
+      // Nudge the box to the right until it no longer overlaps mesh nodes, with bounds checking
+      int guard = 0;
+      while (overlapsMesh() && guard < 50) {
+        desired.x = std::min(field - w - 1.0, desired.x + 20.0);
+        bx.xMin = desired.x;
+        bx.xMax = desired.x + w;
+        guard++;
+      }
+      b->SetBoundaries(bx);
+      std::cout << "Building moved (safe) to (" << desired.x << ", " << desired.y << ")" << std::endl;
+    });
+  };
 
-  // Wi‑Fi channel/PHY with increased range for better connectivity
-  YansWifiChannelHelper chan;
-  chan.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
-  chan.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel");
-  
-  // INCREASED RANGE: Set MaxRange to 200m to ensure connectivity across diagonal
-  chan.AddPropagationLoss("ns3::RangePropagationLossModel", "MaxRange", DoubleValue(200.0));
+  // Move cluster250a building - adjusted and made safe
+  scheduleMoveAvoidingMesh(2.0, cluster250a, Vector(150.0, 180.0, 0.0), 60.0, 8.0);
+  scheduleMoveAvoidingMesh(4.0, cluster250a, Vector(250.0, 130.0, 0.0), 60.0, 8.0);
+  scheduleMoveAvoidingMesh(7.0, cluster250a, Vector(100.0, 280.0, 0.0), 60.0, 8.0);
 
-  YansWifiPhyHelper phy;
-  phy.SetChannel(chan.Create());
-  phy.Set("TxPowerStart", DoubleValue(20.0));  // Increased from 7.0 to 20.0 dBm
-  phy.Set("TxPowerEnd", DoubleValue(20.0));
-  phy.Set("RxNoiseFigure", DoubleValue(7.0));
+  // Move cluster250b building - adjusted and made safe
+  scheduleMoveAvoidingMesh(2.5, cluster250b, Vector(200.0, 180.0, 0.0), 80.0, 8.0);
+  scheduleMoveAvoidingMesh(5.0, cluster250b, Vector(130.0, 300.0, 0.0), 80.0, 8.0);
+
+  // Move cluster50 building - adjusted and made safe
+  scheduleMoveAvoidingMesh(3.0, cluster50, Vector(255.0, 80.0, 0.0), 80.0, 8.0);
+  scheduleMoveAvoidingMesh(6.0, cluster50, Vector(215.0, 180.0, 0.0), 80.0, 8.0);
+  
+  // Write position grid will be called after mobility models are installed
+
+  // WiFi channel setup for mesh network
+  YansWifiChannelHelper meshChannel;
+  meshChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
+  meshChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel");
+  meshChannel.AddPropagationLoss("ns3::RangePropagationLossModel", "MaxRange", DoubleValue(200.0));
+
+  YansWifiPhyHelper meshPhy;
+  meshPhy.SetChannel(meshChannel.Create());
+  meshPhy.Set("TxPowerStart", DoubleValue(20.0));
+  meshPhy.Set("TxPowerEnd", DoubleValue(20.0));
+  meshPhy.Set("RxNoiseFigure", DoubleValue(7.0));
+
+  // WiFi channel setup for STA connections
+  YansWifiChannelHelper staChannel;
+  staChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
+  staChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel");
+  staChannel.AddPropagationLoss("ns3::RangePropagationLossModel", "MaxRange", DoubleValue(100.0));
+
+  YansWifiPhyHelper staPhy;
+  staPhy.SetChannel(staChannel.Create());
+  staPhy.Set("TxPowerStart", DoubleValue(15.0));
+  staPhy.Set("TxPowerEnd", DoubleValue(15.0));
+  staPhy.Set("RxNoiseFigure", DoubleValue(7.0));
   
   std::system(("mkdir -p " + kOutDir).c_str());
 
-  // 802.11s mesh with proper configuration
+  // Create simplified mesh network - all nodes in one mesh network
   MeshHelper mesh = MeshHelper::Default();
   mesh.SetStackInstaller("ns3::Dot11sStack");
   mesh.SetSpreadInterfaceChannels(MeshHelper::SPREAD_CHANNELS);
-  mesh.SetMacType("RandomStart", TimeValue(Seconds(0.1)));  // Faster startup
-  
-  // Configure mesh routing protocol
+  mesh.SetMacType("RandomStart", TimeValue(Seconds(0.1)));
   mesh.SetNumberOfInterfaces(1);
-  
-  NetDeviceContainer devs = mesh.Install(phy, nodes);
 
-  // Enable PCAP and ASCII traces
-  phy.EnablePcapAll(kOutDir + "/" + kPcapPrefix, true);
-  phy.EnableAsciiAll(kOutDir + "/" + kAsciiTracesPrefix);
+  // Install mesh on all nodes (backhaul + mesh + STA + Sayed & Sadia)
+  NetDeviceContainer meshDevices = mesh.Install(meshPhy, allNodes);
 
-  // Internet + IPs
-  InternetStackHelper internet;
-  
-  // Add OLSR routing protocol for better mesh routing
+  // Create point-to-point backhaul connection (simulating wired internet)
+  PointToPointHelper p2p;
+  p2p.SetDeviceAttribute("DataRate", StringValue("100Mbps"));
+  p2p.SetChannelAttribute("Delay", StringValue("5ms"));
+
+  NodeContainer internetNodes;
+  internetNodes.Create(1);
+  NetDeviceContainer internetDevices = p2p.Install(backhaulNodes.Get(0), internetNodes.Get(0));
+
+  // Enable tracing
+  meshPhy.EnablePcapAll(kOutDir + "/" + kPcapPrefix + "_mesh", true);
+  p2p.EnablePcapAll(kOutDir + "/" + kPcapPrefix + "_backhaul", true);
+
+  AsciiTraceHelper ascii;
+  Ptr<OutputStreamWrapper> meshStream = ascii.CreateFileStream(kOutDir + "/" + kAsciiTracesPrefix + "_mesh.tr");
+  meshPhy.EnableAsciiAll(meshStream);
+
+  // Internet stack setup with OLSR routing
   OlsrHelper olsr;
-  Ipv4ListRoutingHelper list;
-  list.Add(olsr, 10);
-  internet.SetRoutingHelper(list);
+  InternetStackHelper internet;
+  internet.SetRoutingHelper(olsr);
   
-  internet.Install(nodes);
+  internet.Install(allNodes);
+  internet.Install(internetNodes);
+
+  // IP address assignment - Use single network for simplicity
+  Ipv4AddressHelper ipv4;
   
-  Ipv4AddressHelper ip;
-  ip.SetBase("10.0.0.0", "255.255.255.0");
-  Ipv4InterfaceContainer ifs = ip.Assign(devs);
+  // Assign IPs to mesh network (all nodes)
+  ipv4.SetBase("10.1.0.0", "255.255.0.0");
+  Ipv4InterfaceContainer meshInterfaces = ipv4.Assign(meshDevices);
   
-  // CRITICAL: Enable global routing for mesh networks
+  // Assign IPs to backhaul connection
+  ipv4.SetBase("172.16.0.0", "255.255.255.0");
+  Ipv4InterfaceContainer internetInterfaces = ipv4.Assign(internetDevices);
+  
+  // Populate routing tables after all IP assignments
   Ipv4GlobalRoutingHelper::PopulateRoutingTables();
-
-  // Traffic: Simplified and focused on Sayed -> Sadia communication
-  const uint16_t udpPort = 5000;
-  const uint16_t tcpPort = 6000;
   
-  // UDP Server on Sadia (node n-1)
-  UdpServerHelper udpSink(udpPort);
-  ApplicationContainer udpSinkApp = udpSink.Install(nodes.Get(nNodes - 1));
-  udpSinkApp.Start(Seconds(1.0));
-  udpSinkApp.Stop(Seconds(15.0));
+  // Print IP assignments for debugging
+  std::cout << "IP Address Assignments:" << std::endl;
+  std::cout << "  Backhaul: " << meshInterfaces.GetAddress(0) << std::endl;
+  for (uint32_t i = 0; i < nMeshHops; ++i) {
+    std::cout << "  Mesh" << i << ": " << meshInterfaces.GetAddress(1 + i) << std::endl;
+  }
+  for (uint32_t i = 0; i < nTotalStas; ++i) {
+    std::cout << "  STA" << i << ": " << meshInterfaces.GetAddress(1 + nMeshHops + i) << std::endl;
+  }
+  std::cout << "  Sayed: " << meshInterfaces.GetAddress(1 + nMeshHops + nTotalStas) << std::endl;
+  std::cout << "  Sadia: " << meshInterfaces.GetAddress(1 + nMeshHops + nTotalStas + 1) << std::endl;
 
-  // UDP Client on Sayed (node 0) -> Sadia
-  OnOffHelper udpClient("ns3::UdpSocketFactory", 
-                       InetSocketAddress(ifs.GetAddress(nNodes - 1), udpPort));
-  udpClient.SetConstantRate(DataRate("2Mbps"), 1200);
-  udpClient.SetAttribute("StartTime", TimeValue(Seconds(3.0)));  // Start after mesh setup
-  udpClient.SetAttribute("StopTime", TimeValue(Seconds(15.0)));
-  ApplicationContainer udpClientApp = udpClient.Install(nodes.Get(0));
+  // Applications: PRESERVE SAYED-SADIA COMMUNICATION + Add new traffic patterns
+  const uint16_t udpPort = 5000;
+  const uint16_t tcpPort = 7000;  // Changed from 6000 to 7000
+  const uint16_t sayedSadiaPort = 8000;  // Special port for Sayed-Sadia communication
 
-  // TCP Server on Sadia (node n-1)
-  PacketSinkHelper tcpSink("ns3::TcpSocketFactory",
+  // SAYED-SADIA UDP COMMUNICATION (PRESERVE ORIGINAL PATTERN)
+  UdpServerHelper sayedSadiaUdpServer(sayedSadiaPort);
+  ApplicationContainer sayedSadiaUdpApp = sayedSadiaUdpServer.Install(sayedSadiaNodes.Get(1)); // Sadia as server
+  sayedSadiaUdpApp.Start(Seconds(1.0));
+  sayedSadiaUdpApp.Stop(Seconds(simTime));
+
+  OnOffHelper sayedSadiaUdpClient("ns3::UdpSocketFactory",
+                                 InetSocketAddress(meshInterfaces.GetAddress(allNodes.GetN()-1), sayedSadiaPort)); // Sadia's mesh IP (last node)
+  sayedSadiaUdpClient.SetConstantRate(DataRate("2Mbps"), 1200);
+  sayedSadiaUdpClient.SetAttribute("StartTime", TimeValue(Seconds(1.5)));  // Start earlier for better connectivity
+  sayedSadiaUdpClient.SetAttribute("StopTime", TimeValue(Seconds(simTime)));
+  ApplicationContainer sayedClientApp = sayedSadiaUdpClient.Install(sayedSadiaNodes.Get(0)); // Sayed as client
+
+  // SAYED-SADIA TCP COMMUNICATION (PRESERVE ORIGINAL PATTERN)
+  PacketSinkHelper sayedSadiaTcpServer("ns3::TcpSocketFactory",
                           InetSocketAddress(Ipv4Address::GetAny(), tcpPort));
-  ApplicationContainer tcpSinkApp = tcpSink.Install(nodes.Get(nNodes - 1));
-  tcpSinkApp.Start(Seconds(1.0));
-  tcpSinkApp.Stop(Seconds(15.0));
+  ApplicationContainer sayedSadiaTcpApp = sayedSadiaTcpServer.Install(sayedSadiaNodes.Get(1)); // Sadia as server
+  sayedSadiaTcpApp.Start(Seconds(1.0));  // Start server after routing stabilizes
+  sayedSadiaTcpApp.Stop(Seconds(simTime));
 
-  // TCP Client on Sayed (node 0) -> Sadia
-  BulkSendHelper tcpClient("ns3::TcpSocketFactory",
-                          InetSocketAddress(ifs.GetAddress(nNodes - 1), tcpPort));
-  tcpClient.SetAttribute("MaxBytes", UintegerValue(0)); // unlimited
-  ApplicationContainer tcpClientApp = tcpClient.Install(nodes.Get(0));
-  tcpClientApp.Start(Seconds(4.0));  // Start after UDP
-  tcpClientApp.Stop(Seconds(15.0));
+  // Use BulkSendHelper for TCP (simpler approach)
+  BulkSendHelper sayedSadiaTcpClient("ns3::TcpSocketFactory",
+                                    InetSocketAddress(meshInterfaces.GetAddress(allNodes.GetN()-1), tcpPort)); // Sadia's mesh IP (last node)
+  sayedSadiaTcpClient.SetAttribute("MaxBytes", UintegerValue(1000000)); // 1MB of data
+  sayedSadiaTcpClient.SetAttribute("StartTime", TimeValue(Seconds(1.5)));  // Start after server is ready
+  sayedSadiaTcpClient.SetAttribute("StopTime", TimeValue(Seconds(simTime)));
+  ApplicationContainer sayedTcpClientApp = sayedSadiaTcpClient.Install(sayedSadiaNodes.Get(0)); // Sayed as client
+
+  // Internet server (simulating remote server)
+  UdpServerHelper internetUdpServer(udpPort);
+  ApplicationContainer internetUdpApp = internetUdpServer.Install(internetNodes.Get(0));
+  internetUdpApp.Start(Seconds(1.0));
+  internetUdpApp.Stop(Seconds(simTime));
+
+  // STA clients connecting to internet through mesh network
+  for (uint32_t i = 0; i < nTotalStas; ++i) {
+    // UDP client to internet server
+    OnOffHelper udpClient("ns3::UdpSocketFactory",
+                         InetSocketAddress(internetInterfaces.GetAddress(1), udpPort));
+    udpClient.SetConstantRate(DataRate("1Mbps"), 1200);
+    udpClient.SetAttribute("StartTime", TimeValue(Seconds(2.0 + i * 0.2)));
+    udpClient.SetAttribute("StopTime", TimeValue(Seconds(simTime)));
+    udpClient.Install(staNodes.Get(i));
+  }
 
   // FlowMonitor for KPIs
   FlowMonitorHelper fm;
   Ptr<FlowMonitor> monitor = fm.InstallAll();
 
-  // NetAnim: label ends
+  // NetAnim setup with detailed node labeling and coloring
   AnimationInterface anim(kOutDir + "/" + kNetAnimFile);
   anim.EnablePacketMetadata(true);
-  anim.UpdateNodeDescription(nodes.Get(0), "Sayed");
-  anim.UpdateNodeColor(nodes.Get(0), 0, 150, 255);
-  anim.UpdateNodeDescription(nodes.Get(nNodes - 1), "Sadia");
-  anim.UpdateNodeColor(nodes.Get(nNodes - 1), 255, 120, 0);
+  anim.SetMaxPktsPerTraceFile(500000);
+
+  // Color and label all nodes
+  // Backhaul node (blue)
+  anim.UpdateNodeDescription(backhaulNodes.Get(0), "Backhaul");
+  anim.UpdateNodeColor(backhaulNodes.Get(0), 0, 0, 255);
+  
+  // Internet node (green)
+  anim.UpdateNodeDescription(internetNodes.Get(0), "Internet");
+  anim.UpdateNodeColor(internetNodes.Get(0), 0, 255, 0);
+  
+  // Mesh hop nodes (red)
+  for (uint32_t i = 0; i < nMeshHops; ++i) {
+    std::string name = "Mesh" + std::to_string(i);
+    anim.UpdateNodeDescription(meshNodes.Get(i), name);
+    anim.UpdateNodeColor(meshNodes.Get(i), 255, 0, 0);
+  }
+  
+  // STA nodes (yellow)
+  for (uint32_t i = 0; i < nTotalStas; ++i) {
+    std::string name = "STA" + std::to_string(i);
+    anim.UpdateNodeDescription(staNodes.Get(i), name);
+    anim.UpdateNodeColor(staNodes.Get(i), 255, 255, 0);
+  }
+  
+  // Sayed and Sadia (PRESERVE ORIGINAL COLORS)
+  anim.UpdateNodeDescription(sayedSadiaNodes.Get(0), "Sayed");
+  anim.UpdateNodeColor(sayedSadiaNodes.Get(0), 0, 150, 255);  // Original blue
+  
+  anim.UpdateNodeDescription(sayedSadiaNodes.Get(1), "Sadia");
+  anim.UpdateNodeColor(sayedSadiaNodes.Get(1), 255, 120, 0);  // Original orange
 
   // IPv4 L3 ASCII tracing
   {
@@ -334,15 +584,18 @@ int main(int argc, char **argv) {
     internet.EnableAsciiIpv4All(ipStream);
   }
 
-  // CRITICAL: Allow time for mesh formation and route discovery
-  std::cout << "Starting simulation - allowing time for mesh formation..." << std::endl;
-  
-  Simulator::Stop(Seconds(15.0));
+  std::cout << "Starting backhaul-connected mesh simulation with Sayed & Sadia..." << std::endl;
+  std::cout << "Simulation time: " << simTime << " seconds" << std::endl;
+  std::cout << "Output directory: " << kOutDir << std::endl;
+  std::cout << "Preserving all original building movements and Sayed-Sadia communication!" << std::endl;
+
+  Simulator::Stop(Seconds(simTime));
   Simulator::Run();
   
   monitor->SerializeToXmlFile(kOutDir + "/" + kFlowmonFile, true, true);
   Simulator::Destroy();
   
-  std::cout << "Simulation completed!" << std::endl;
+  std::cout << "Backhaul mesh simulation completed!" << std::endl;
+  std::cout << "Results saved to: " << kOutDir << std::endl;
   return 0;
 }

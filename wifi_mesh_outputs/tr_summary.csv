@@ -1,6 +1,0 @@
-metric,value
-total_frames,92701.0
-data_tx_frames,9211.0
-data_rx_frames,28739.0
-data_delivery_ratio,3.120073824774726
-data_retry_rate_mean,0.1549407114624506

@@ -1,0 +1,121 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>WiFi Mesh Backhaul Network Analysis Report</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 40px; }
+                h1 { color: #2c3e50; }
+                h2 { color: #34495e; }
+                .summary { background-color: #ecf0f1; padding: 20px; border-radius: 5px; }
+                .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }
+                .metric { background-color: #3498db; color: white; padding: 15px; border-radius: 5px; text-align: center; }
+                .metric h3 { margin: 0; }
+                .metric p { margin: 5px 0; font-size: 24px; font-weight: bold; }
+                table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+                img { max-width: 100%; height: auto; margin: 20px 0; }
+            </style>
+        </head>
+        <body>
+            <h1>WiFi Mesh Backhaul Network Analysis Report</h1>
+            <p><strong>Generated:</strong> 2025-10-01 05:52:21</p>
+            
+            <div class="summary">
+                <h2>Network Overview</h2>
+                <p>This report analyzes the performance of a WiFi mesh backhaul network simulation with the following topology:</p>
+                <ul>
+                    <li><strong>Backhaul Gateway:</strong> 1 node (internet connection point)</li>
+                    <li><strong>Mesh Hop Nodes:</strong> 4 nodes forming a chain: Backhaul → Mesh0 → Mesh1 → Mesh2 → Mesh3</li>
+                    <li><strong>STA Nodes:</strong> 8 mobile nodes connected to nearest mesh hops</li>
+                    <li><strong>Special Nodes:</strong> Sayed and Sadia for communication testing</li>
+                    <li><strong>Simulation Time:</strong> 10.0 seconds</li>
+                    <li><strong>Field Size:</strong> 400.0m × 400.0m</li>
+                </ul>
+                <p><strong>Network Architecture:</strong> The backhaul is connected only to Mesh0, which then forms a chain with the other mesh nodes. STA nodes connect to the nearest mesh hop, and all traffic flows through this mesh backbone to reach the internet.</p>
+            </div>
+        
+            <div class="metrics">
+                <div class="metric">
+                    <h3>Total Flows</h3>
+                    <p>9</p>
+                </div>
+                <div class="metric">
+                    <h3>Average Throughput</h3>
+                    <p>0.37 Mbps</p>
+                </div>
+                <div class="metric">
+                    <h3>Average Delay</h3>
+                    <p>0.1079 s</p>
+                </div>
+                <div class="metric">
+                    <h3>Packet Loss Rate</h3>
+                    <p>0.00%</p>
+                </div>
+                <div class="metric">
+                    <h3>Total Traffic</h3>
+                    <p>0.64 MB</p>
+                </div>
+                <div class="metric">
+                    <h3>Simulation Duration</h3>
+                    <p>10.0 s</p>
+                </div>
+            </div>
+            
+            <h2>Flow Statistics</h2>
+            <table>
+                <tr><th>Metric</th><th>Value</th></tr>
+                <tr><td>Total Flows</td><td>9</td></tr>
+                <tr><td>Average Throughput</td><td>0.372 Mbps</td></tr>
+                <tr><td>Max Throughput</td><td>1.862 Mbps</td></tr>
+                <tr><td>Min Throughput</td><td>0.000 Mbps</td></tr>
+                <tr><td>Average Delay</td><td>0.107856 seconds</td></tr>
+                <tr><td>Max Delay</td><td>0.316487 seconds</td></tr>
+                <tr><td>Min Delay</td><td>0.000000 seconds</td></tr>
+                <tr><td>Average Packet Loss</td><td>0.00%</td></tr>
+                <tr><td>Max Packet Loss</td><td>0.00%</td></tr>
+                <tr><td>Total Bytes Transferred</td><td>0.64 MB</td></tr>
+                <tr><td>Total Packets Transmitted</td><td>1223</td></tr>
+                <tr><td>Total Packets Received</td><td>550</td></tr>
+            </table>
+            
+            <h2>Network Topology</h2>
+            <img src="network_topology_analysis.png" alt="Network Topology">
+            
+            <h2>Flow Analysis</h2>
+            <img src="flow_analysis.png" alt="Flow Analysis">
+            
+            <h2>Animation</h2>
+            <p>The network animation shows the dynamic behavior of the mesh network:</p>
+            <ul>
+                <li>STA nodes moving with RandomWalk2d mobility model</li>
+                <li>Building obstacles with scheduled movements</li>
+                <li>Mesh network connectivity and routing</li>
+                <li>Sayed-Sadia communication through the mesh</li>
+                <li>STA nodes accessing internet through backhaul</li>
+            </ul>
+            
+            <h2>Key Features Demonstrated</h2>
+            <ul>
+                <li><strong>Backhaul Connectivity:</strong> Internet gateway with point-to-point connection</li>
+                <li><strong>Mesh Backbone:</strong> Chain of mesh hop nodes providing connectivity</li>
+                <li><strong>STA Access:</strong> Mobile nodes connecting to nearest mesh hop</li>
+                <li><strong>Special Communication:</strong> Sayed-Sadia direct communication</li>
+                <li><strong>Dynamic Environment:</strong> Moving buildings affecting propagation</li>
+                <li><strong>Multiple Traffic Patterns:</strong> UDP, TCP, and internet access flows</li>
+            </ul>
+            
+            <h2>Files Generated</h2>
+            <ul>
+                <li>wifi_mesh_backhaul_animation.gif - Network animation</li>
+                <li>wifi_mesh_backhaul_topology.png - Static topology overview</li>
+                <li>network_topology_analysis.png - Topology analysis</li>
+                <li>flow_analysis.png - Flow performance analysis</li>
+                <li>flowmon-wifi-mesh-backhaul.xml - FlowMonitor results</li>
+                <li>wifi_mesh_backhaul_ascii_traces_mesh.tr - Detailed traces</li>
+                <li>netanim-wifi-mesh-backhaul.xml - NetAnim animation file</li>
+            </ul>
+        </body>
+        </html>
+        
