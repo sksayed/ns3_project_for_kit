@@ -18,7 +18,7 @@ import re
 def run_tshark_analysis(pcap_file):
     """Run tshark analysis on PCAP file to extract TCP information."""
     try:
-        # Use tshark to extract TCP stream information
+        # Use tshark to extract TCP stream information from innermost headers
         cmd = [
             'tshark', '-r', pcap_file, '-T', 'fields',
             '-e', 'frame.time_relative',
@@ -29,7 +29,9 @@ def run_tshark_analysis(pcap_file):
             '-e', 'tcp.stream',
             '-e', 'frame.len',
             '-e', 'tcp.flags',
-            '-Y', 'tcp'
+            '-Y', 'tcp',
+            '-E', 'separator=\t',
+            '-E', 'occurrence=l'
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -52,7 +54,7 @@ def run_tshark_analysis(pcap_file):
                         'dst_ip': parts[2] if parts[2] else '',
                         'src_port': int(parts[3]) if parts[3] else 0,
                         'dst_port': int(parts[4]) if parts[4] else 0,
-                        'stream_id': int(parts[5]) if parts[5] else 0,
+                        'tshark_stream': int(parts[5]) if parts[5] else -1,
                         'length': int(parts[6]) if parts[6] else 0,
                         'flags': parts[7] if len(parts) > 7 else ''
                     })
@@ -73,20 +75,34 @@ def analyze_tcp_streams(df):
     if df is None or df.empty:
         return None
     
+    # Build stable bidirectional stream ids from 5-tuple (inner IP/ports)
+    def canonical_key(row):
+        a = (row['src_ip'], int(row['src_port']))
+        b = (row['dst_ip'], int(row['dst_port']))
+        return tuple(sorted([a, b]))
+    
     streams = {}
+    key_to_id = {}
+    next_id = 0
     
     for _, row in df.iterrows():
-        stream_id = row['stream_id']
+        key = canonical_key(row)
+        if key not in key_to_id:
+            key_to_id[key] = next_id
+            next_id += 1
+        stream_id = key_to_id[key]
+        
         if stream_id not in streams:
             streams[stream_id] = {
                 'src_ip': row['src_ip'],
                 'dst_ip': row['dst_ip'],
-                'src_port': row['src_port'],
-                'dst_port': row['dst_port'],
+                'src_port': int(row['src_port']),
+                'dst_port': int(row['dst_port']),
                 'packets': [],
                 'start_time': row['time'],
                 'end_time': row['time'],
-                'total_bytes': 0
+                'total_bytes': 0,
+                'tshark_stream_ids': set()
             }
         
         streams[stream_id]['packets'].append({
@@ -96,15 +112,19 @@ def analyze_tcp_streams(df):
         })
         streams[stream_id]['end_time'] = max(streams[stream_id]['end_time'], row['time'])
         streams[stream_id]['total_bytes'] += row['length']
+        if 'tshark_stream' in row and row['tshark_stream'] is not None:
+            try:
+                streams[stream_id]['tshark_stream_ids'].add(int(row['tshark_stream']))
+            except Exception:
+                pass
     
     # Convert to DataFrame
     stream_data = []
-    for stream_id, stream_info in streams.items():
+    for sid, stream_info in streams.items():
         duration = stream_info['end_time'] - stream_info['start_time']
         throughput = (stream_info['total_bytes'] * 8) / (duration * 1e6) if duration > 0 else 0
-        
         stream_data.append({
-            'stream_id': stream_id,
+            'stream_id': sid,
             'src_ip': stream_info['src_ip'],
             'dst_ip': stream_info['dst_ip'],
             'src_port': stream_info['src_port'],
@@ -112,7 +132,8 @@ def analyze_tcp_streams(df):
             'duration': duration,
             'total_bytes': stream_info['total_bytes'],
             'throughput_mbps': throughput,
-            'packet_count': len(stream_info['packets'])
+            'packet_count': len(stream_info['packets']),
+            'tshark_stream_set': ','.join(sorted(str(x) for x in stream_info['tshark_stream_ids']))
         })
     
     return pd.DataFrame(stream_data)

@@ -9,41 +9,53 @@ ANALYZER_DIR="$ROOT_DIR/lte_analyzer"
 SCRATCH_DIR="$ROOT_DIR/scratch"
 SIM_NAME="lte_playfield_traces"
 
-echo "[1/5] Running simulation: $SIM_NAME"
+echo "[1/6] Running simulation: $SIM_NAME"
 # Copy file to scratch temporarily for ns-3 launcher
 cp "$PROJECT_DIR/$SIM_NAME.cc" "$SCRATCH_DIR/$SIM_NAME.cc"
 "$NS3_CMD" run "scratch/$SIM_NAME" | cat || true
 
-echo "[2/5] Running trace analyzer (analyze_traces_lte.py)"
-python3 "$ANALYZER_DIR/analyze_traces_lte.py" | cat || true
-
-echo "[3/5] Running FlowMonitor analyzer"
+echo "[2/6] Running FlowMonitor analyzer"
 python3 "$ANALYZER_DIR/visualize_flowmon_for_lte_playground_lte.py" | cat || true
 
-echo "[4/5] Running PCAP TCP path analyzer if PCAPs exist"
+echo "[3/6] Running PCAP TCP path analyzer if PCAPs exist"
 if ls "$OUT_DIR" | grep -q "lte_playfield_rw_pcap"; then
   python3 "$ANALYZER_DIR/analyze_pcap_tcp_paths_lte.py" | cat || true
 else
   echo "No PCAPs found; skipping PCAP-based TCP path analysis."
 fi
 
-echo "[5/5] Running enhanced visualizer"
-python3 "$ANALYZER_DIR/enhanced_visualizer_lte.py" | cat || true
+echo "[4/6] Parsing IPv4 L3 traces (LTE-specific)"
+python3 "$ANALYZER_DIR/analyze_lte_ipv4.py" | cat || true
+
+echo "[5/6] Generating LTE topology visualization"
+# Ensure imageio is available for GIF generation (topology animation)
+python3 - <<'PY'
+try:
+    import imageio.v2 as _
+    print('imageio present')
+except Exception:
+    print('installing imageio for GIF support...')
+    import subprocess, sys
+    subprocess.run([sys.executable, '-m', 'pip', 'install', '--user', 'imageio'], check=False)
+PY
+python3 "$ANALYZER_DIR/visualize_lte_topology.py" | cat || true
+
+echo "[6/6] Generating updated LTE HTML report"
+python3 "$ANALYZER_DIR/generate_lte_report.py" | cat || true
 
 echo "Listing key outputs"
 ls -l "$OUT_DIR" | sed -n \
-  -e '/analysis_report.html/p' \
-  -e '/performance_dashboard.png/p' \
-  -e '/network_topology.png/p' \
-  -e '/throughput_heatmap.png/p' \
-  -e '/tr_mac_throughput.png/p' \
-  -e '/tr_rate_distribution.png/p' \
   -e '/flowmon-lte-playfield-rw.xml/p' \
-  -e '/tcp_analysis.png/p' || true
+  -e '/flowmon_analysis.png/p' \
+  -e '/flowmon_analysis.csv/p' \
+  -e '/lte_throughput_analysis.png/p' \
+  -e '/lte_topology_visualization.png/p' \
+  -e '/lte_topology_animation.gif/p' \
+  -e '/lte_analysis_report_updated.html/p' || true
 
 echo "Done. Outputs are under $OUT_DIR"
 
-echo "Open enhanced report: firefox $OUT_DIR/analysis_report.html"
+echo "Open updated LTE report: firefox $OUT_DIR/lte_analysis_report_updated.html"
 
 # Clean up: remove temporary file from scratch
 echo "Cleaning up temporary files..."
