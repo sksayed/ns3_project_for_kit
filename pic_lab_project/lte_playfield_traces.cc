@@ -33,92 +33,6 @@ static const std::string kAsciiTracesPrefix = "lte_playfield_ascii_traces";
 static const std::string kNetAnimFile = "netanim-lte-playfield-rw.xml";
 static const std::string kFlowmonFile = "flowmon-lte-playfield-rw.xml";
 
-// Write an ASCII grid of node and building positions to Lte_outputs/position_grid.txt
-static void WriteAsciiPositionGrid(const NodeContainer &nodes,
-                                   const BuildingContainer &buildings,
-                                   double fieldMeters,
-                                   double cellMeters = 10.0,
-                                   const std::string &outDir = kOutDir,
-                                   const std::string &outName = "position_grid.txt") {
-  const double fieldMin = 0.0;
-  const double fieldMax = fieldMeters;
-  const int W = static_cast<int>((fieldMax - fieldMin) / cellMeters) + 1;
-  const int H = W;
-
-  std::vector<std::string> grid(H, std::string(W, '.'));
-
-  // Mark buildings as '#'
-  for (uint32_t b = 0; b < buildings.GetN(); ++b) {
-    Ptr<Building> bd = buildings.Get(b);
-    Box bx = bd->GetBoundaries();
-    int x0 = std::max(0, static_cast<int>(std::floor((bx.xMin - fieldMin) / cellMeters)));
-    int x1 = std::min(W - 1, static_cast<int>(std::floor((bx.xMax - fieldMin) / cellMeters)));
-    int y0 = std::max(0, static_cast<int>(std::floor((bx.yMin - fieldMin) / cellMeters)));
-    int y1 = std::min(H - 1, static_cast<int>(std::floor((bx.yMax - fieldMin) / cellMeters)));
-    for (int gy = y0; gy <= y1; ++gy) {
-      for (int gx = x0; gx <= x1; ++gx) {
-        grid[H - 1 - gy][gx] = '#';
-      }
-    }
-  }
-
-  auto nodeChar = [&](uint32_t i) -> char {
-    if (i == 0) return 'S';
-    if (i + 1 == nodes.GetN()) return 'D';
-    if (i < 10) return static_cast<char>('0' + static_cast<int>(i));
-    return static_cast<char>('a' + static_cast<int>(i - 10));
-  };
-
-  // Overlay node markers
-  for (uint32_t i = 0; i < nodes.GetN(); ++i) {
-    Ptr<MobilityModel> mm = nodes.Get(i)->GetObject<MobilityModel>();
-    if (!mm) continue;
-    Vector p = mm->GetPosition();
-    int gx = static_cast<int>(std::round((p.x - fieldMin) / cellMeters));
-    int gy = static_cast<int>(std::round((p.y - fieldMin) / cellMeters));
-    if (gx < 0 || gx >= W || gy < 0 || gy >= H) continue;
-    grid[H - 1 - gy][gx] = nodeChar(i);
-  }
-
-  std::system(("mkdir -p " + outDir).c_str());
-  std::ofstream ofs(outDir + "/" + outName);
-  ofs << "Grid " << W << "x" << H << " (cell=" << cellMeters << "m). Top=+Y, Right=+X\n";
-  ofs << "Legend: '.'=free, '#'=building, 'S'=Sayed(0), 'D'=Sadia(" << (nodes.GetN() - 1)
-      << "), digits/letters=other UEs\n\n";
-
-  // X-axis header every 5 cells (label in tens of meters modulo 100)
-  ofs << "     ";
-  for (int gx = 0; gx < W; ++gx) {
-    if (gx % 5 == 0) {
-      ofs << std::setw(2) << std::setfill(' ') << ((gx * static_cast<int>(cellMeters)) / 10 % 100);
-    } else {
-      ofs << " ";
-    }
-  }
-  ofs << "\n";
-
-  for (int gy = 0; gy < H; ++gy) {
-    int yMeters = static_cast<int>((H - 1 - gy) * cellMeters);
-    ofs << std::setw(4) << yMeters << " " << grid[gy] << "\n";
-  }
-
-  ofs << "\nNodes:\n";
-  for (uint32_t i = 0; i < nodes.GetN(); ++i) {
-    Ptr<MobilityModel> mm = nodes.Get(i)->GetObject<MobilityModel>();
-    if (!mm) continue;
-    Vector p = mm->GetPosition();
-    std::string name = (i == 0 ? "Sayed" : (i + 1 == nodes.GetN() ? "Sadia" : ("UE" + std::to_string(i))));
-    ofs << " - " << std::setw(6) << name << " (node " << i << "): ("
-        << std::fixed << std::setprecision(1) << p.x << ", " << p.y << ")\n";
-  }
-
-  ofs << "\nBuildings (xMin..xMax, yMin..yMax):\n";
-  for (uint32_t b = 0; b < buildings.GetN(); ++b) {
-    Box bx = buildings.Get(b)->GetBoundaries();
-    ofs << " - B" << b << ": x[" << bx.xMin << "," << bx.xMax << "], y[" << bx.yMin << "," << bx.yMax << "]\n";
-  }
-  ofs.close();
-}
 
 int main(int argc, char **argv) {
   // Basics
@@ -175,11 +89,11 @@ int main(int argc, char **argv) {
   }
   midMob.Install(mids);
 
-  // eNB positions (left-center and right-center)
+  // eNB positions (eNB0: left-center, eNB1: custom position)
   MobilityHelper enbMob;
   Ptr<ListPositionAllocator> enbPos = CreateObject<ListPositionAllocator>();
-  enbPos->Add(Vector(field * 0.25, field * 0.5, 15.0));
-  enbPos->Add(Vector(field * 0.75, field * 0.5, 15.0));
+  enbPos->Add(Vector(field * 0.25, field * 0.5, 15.0));  // eNB0 at (100, 200, 15)
+  enbPos->Add(Vector(100.0, 50.0, 15.0));                 // eNB1 at (100, 50, 15)
   enbMob.SetPositionAllocator(enbPos);
   enbMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
   enbMob.Install(enbNodes);
@@ -242,9 +156,10 @@ int main(int argc, char **argv) {
   Config::SetDefault("ns3::LteUePhy::TxPower", DoubleValue(10.0));  // dBm
 
   // LTE + EPC
-  Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
-  lteHelper->SetEpcHelper(epcHelper);
+  Ptr<PointToPointEpcHelper> epcHelperP2p = CreateObject<PointToPointEpcHelper>();
+  lteHelper->SetEpcHelper(epcHelperP2p);
+  Ptr<EpcHelper> epcHelper = epcHelperP2p;
 
   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes);
   NetDeviceContainer ueDevs = lteHelper->InstallUeDevice(ueNodes);
@@ -314,7 +229,7 @@ int main(int argc, char **argv) {
 
   Ipv4AddressHelper ipv4h;
   ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-  Ipv4InterfaceContainer internetIfaces = ipv4h.Assign(internetDevices);
+  ipv4h.Assign(internetDevices);  // Assign IP addresses to internet devices
 
   Ipv4StaticRoutingHelper ipv4RoutingHelper;
   Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
