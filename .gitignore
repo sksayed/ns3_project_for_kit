@@ -54,3 +54,4 @@ vcpkg/
 # Simulation output directories (do not push to remote)
 wifi_mesh_outputs/
 Lte_outputs/
+wifi_mesh_backhaul_outputs/

@@ -203,8 +203,6 @@ int main(int argc, char **argv) {
   LogComponentEnable("OlsrRoutingProtocol", LOG_LEVEL_DEBUG);
   LogComponentEnable("GlobalRouteManager", LOG_LEVEL_DEBUG);
   LogComponentEnable("Ipv4GlobalRouting", LOG_LEVEL_DEBUG);
-  LogComponentEnable("TcpSocketBase", LOG_LEVEL_DEBUG);
-  LogComponentEnable("TcpSocket", LOG_LEVEL_DEBUG);
   LogComponentEnable("OnOffApplication", LOG_LEVEL_DEBUG);
   LogComponentEnable("UdpServer", LOG_LEVEL_INFO);
 
@@ -490,7 +488,6 @@ int main(int argc, char **argv) {
 
   // Applications: PRESERVE SAYED-SADIA COMMUNICATION + Add new traffic patterns
   const uint16_t udpPort = 5000;
-  const uint16_t tcpPort = 7000;  // Changed from 6000 to 7000
   const uint16_t sayedSadiaPort = 8000;  // Special port for Sayed-Sadia communication
 
   // SAYED-SADIA UDP COMMUNICATION (PRESERVE ORIGINAL PATTERN)
@@ -505,21 +502,6 @@ int main(int argc, char **argv) {
   sayedSadiaUdpClient.SetAttribute("StartTime", TimeValue(Seconds(1.5)));  // Start earlier for better connectivity
   sayedSadiaUdpClient.SetAttribute("StopTime", TimeValue(Seconds(simTime)));
   ApplicationContainer sayedClientApp = sayedSadiaUdpClient.Install(sayedSadiaNodes.Get(0)); // Sayed as client
-
-  // SAYED-SADIA TCP COMMUNICATION (PRESERVE ORIGINAL PATTERN)
-  PacketSinkHelper sayedSadiaTcpServer("ns3::TcpSocketFactory",
-                          InetSocketAddress(Ipv4Address::GetAny(), tcpPort));
-  ApplicationContainer sayedSadiaTcpApp = sayedSadiaTcpServer.Install(sayedSadiaNodes.Get(1)); // Sadia as server
-  sayedSadiaTcpApp.Start(Seconds(1.0));  // Start server after routing stabilizes
-  sayedSadiaTcpApp.Stop(Seconds(simTime));
-
-  // Use BulkSendHelper for TCP (simpler approach)
-  BulkSendHelper sayedSadiaTcpClient("ns3::TcpSocketFactory",
-                                    InetSocketAddress(meshInterfaces.GetAddress(allNodes.GetN()-1), tcpPort)); // Sadia's mesh IP (last node)
-  sayedSadiaTcpClient.SetAttribute("MaxBytes", UintegerValue(1000000)); // 1MB of data
-  sayedSadiaTcpClient.SetAttribute("StartTime", TimeValue(Seconds(1.5)));  // Start after server is ready
-  sayedSadiaTcpClient.SetAttribute("StopTime", TimeValue(Seconds(simTime)));
-  ApplicationContainer sayedTcpClientApp = sayedSadiaTcpClient.Install(sayedSadiaNodes.Get(0)); // Sayed as client
 
   // Internet server (simulating remote server)
   UdpServerHelper internetUdpServer(udpPort);
