@@ -16,11 +16,19 @@
 *.routes
 *.tr
 [D|U]l[A-Z][a-z]*Stats.txt
+*Trace.txt
+*MsgsTrace.txt
+Nr*Stats.txt
+default
 
 \#*#
 *~
 
 testpy-output
+
+# Simulation output directories
+*_outputs/
+5g/outputs/
 
 bindings/python/pybindgen/
 
