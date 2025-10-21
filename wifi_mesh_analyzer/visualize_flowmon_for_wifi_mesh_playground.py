@@ -65,7 +65,7 @@ def parse_flowmon_xml(xml_file):
     # Return as a pandas DataFrame for convenient plotting/aggregation.
     return pd.DataFrame(flows)
 
-def create_visualizations(df, out_dir="wifi_mesh_outputs"):
+def create_visualizations(df, out_dir="wifi_mesh_backhaul_outputs"):
     """Create multi-panel summary plots and save a PNG to out_dir."""
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
     fig.suptitle('WiFi Mesh Network Flow Analysis', fontsize=16)
@@ -149,8 +149,8 @@ def create_visualizations(df, out_dir="wifi_mesh_outputs"):
 
 if __name__ == "__main__":
     # Input/Output directory where the ns-3 simulation wrote its results.
-    in_dir = 'wifi_mesh_outputs'
-    xml_path = f"{in_dir}/flowmon-wifi-mesh-playfield-rw.xml"
+    in_dir = 'wifi_mesh_backhaul_outputs'
+    xml_path = f"{in_dir}/flowmon-wifi-mesh-backhaul.xml"
 
     # Parse FlowMonitor XML into a DataFrame.
     df = parse_flowmon_xml(xml_path)
@@ -160,6 +160,6 @@ if __name__ == "__main__":
     
     # Save a CSV report with the raw per-flow statistics and derived metrics.
     df.to_csv(f"{in_dir}/flowmon_analysis.csv", index=False)
-    print("Detailed analysis saved to 'wifi_mesh_outputs/flowmon_analysis.csv'")
+    print("Detailed analysis saved to 'wifi_mesh_backhaul_outputs/flowmon_analysis.csv'")
 
 

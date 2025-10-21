@@ -10,8 +10,8 @@ from matplotlib.patches import FancyArrowPatch
 import pandas as pd
 import numpy as np
 
-TR_DIR = "wifi_mesh_outputs"
-TR_GLOB = os.path.join(TR_DIR, "wifi_mesh_playfield_ascii_traces-*.tr")
+TR_DIR = "wifi_mesh_backhaul_outputs"
+TR_GLOB = os.path.join(TR_DIR, "wifi_mesh_backhaul_ascii_traces-*.tr")
 IPV4_L3_TR = os.path.join(TR_DIR, "ipv4-l3.tr")
 
 line_re = re.compile(
@@ -447,7 +447,7 @@ def main():
     if not tcp_b.empty:
         tcp_b.to_csv(os.path.join(TR_DIR, 'tr_paths_tcp6001.csv'), index=False)
         plot_most_common_path(tcp_b, TR_DIR, title_suffix='TCP dst 6001')
-    print("Saved: traces_parsed.csv, tr_summary.csv, tr_by_rate.csv, tr_udp_ports.csv and PNG plots in wifi_mesh_outputs")
+    print("Saved: traces_parsed.csv, tr_summary.csv, tr_by_rate.csv, tr_udp_ports.csv and PNG plots in wifi_mesh_backhaul_outputs")
 
 if __name__ == '__main__':
     main()

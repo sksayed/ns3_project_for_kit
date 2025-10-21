@@ -25,7 +25,7 @@ plt.style.use('seaborn-v0_8')
 sns.set_palette("husl")
 
 class WiFiMeshVisualizer:
-    def __init__(self, output_dir="wifi_mesh_outputs"):
+    def __init__(self, output_dir="wifi_mesh_backhaul_outputs"):
         self.output_dir = output_dir
         self.fig_size = (16, 12)
         self.dpi = 300
@@ -120,7 +120,7 @@ class WiFiMeshVisualizer:
 
     def parse_trace_files(self):
         """Parse ASCII trace files and return enhanced DataFrame"""
-        trace_files = glob.glob(os.path.join(self.output_dir, "wifi_mesh_playfield_ascii_traces-*.tr"))
+        trace_files = glob.glob(os.path.join(self.output_dir, "wifi_mesh_backhaul_ascii_traces-*.tr"))
         
         if not trace_files:
             print("No trace files found")
@@ -598,7 +598,7 @@ class WiFiMeshVisualizer:
         
         # Parse data
         print("📊 Parsing FlowMonitor data...")
-        flows_df = self.parse_flowmon_xml(os.path.join(self.output_dir, 'flowmon-wifi-mesh-playfield-rw.xml'))
+        flows_df = self.parse_flowmon_xml(os.path.join(self.output_dir, 'flowmon-wifi-mesh-backhaul.xml'))
         
         print("📈 Parsing trace files...")
         traces_df = self.parse_trace_files()

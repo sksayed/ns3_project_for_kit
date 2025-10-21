@@ -5,10 +5,10 @@ import subprocess
 import csv
 from glob import glob
 
-OUT_DIR = "wifi_mesh_outputs"
-PCAP_GLOB = os.path.join(OUT_DIR, "wifi_mesh_playfield_rw_pcap-*.pcap")
+OUT_DIR = "wifi_mesh_backhaul_outputs"
+PCAP_GLOB = os.path.join(OUT_DIR, "wifi_mesh_backhaul_pcap-*.pcap")
 
-node_from_file_re = re.compile(r"rw_pcap-(?P<node>\d+)\.pcap$")
+node_from_file_re = re.compile(r"pcap-(?P<node>\d+)-.*\.pcap$")
 
 def tshark_available() -> bool:
     try:
