@@ -262,7 +262,6 @@ HtPhy::GetTrainingDuration(const WifiTxVector& txVector,
                         << +nDataLtf << ")  and extension (" << +nExtensionLtf
                         << ")  LTFs numbers for HT"); // see IEEE 802.11-2016, section 19.3.9.4.6
                                                       // "HT-LTF definition"
-    Time duration = MicroSeconds(4) * (nDataLtf + nExtensionLtf);
     return MicroSeconds(4) * (1 /* HT-STF */ + nDataLtf + nExtensionLtf);
 }
 
@@ -939,7 +938,7 @@ class ConstructorHt
     {
         ns3::HtPhy::InitializeModes();
         ns3::WifiPhy::AddStaticPhyEntity(ns3::WIFI_MOD_CLASS_HT,
-                                         ns3::Create<ns3::HtPhy>()); // dummy Nss
+                                         std::make_shared<ns3::HtPhy>()); // dummy Nss
     }
 } g_constructor_ht; ///< the constructor for HT modes
 

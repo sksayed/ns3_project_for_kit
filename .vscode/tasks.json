@@ -1,25 +1,48 @@
 {
-    // See https://go.microsoft.com/fwlink/?LinkId=733558
-    // for the documentation about the tasks.json format
     "version": "2.0.0",
     "tasks": [
-        {
-            "label": "Build",
-            "type": "shell",
-            "command": "./ns3",
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
+      {
+        "label": "Configure (GCC, C++17)",
+        "type": "shell",
+        "command": "./ns3 configure --cxx-standard=17",
+        "options": {
+          "env": {
+            "CC": "/usr/bin/gcc",
+            "CXX": "/usr/bin/g++"
+          }
         },
-        {
-            "label": "Run tests",
-            "type": "shell",
-            "command": "./test.py",
-            "group": {
-                "kind": "test",
-                "isDefault": true
-            }
-        }
+        "problemMatcher": []
+      },
+      {
+        "label": "Build (GCC)",
+        "type": "shell",
+        "command": "./ns3 build",
+        "dependsOn": "Configure (GCC, C++17)",
+        "group": { "kind": "build", "isDefault": true }
+      },
+      {
+        "label": "Configure (Clang, C++17)",
+        "type": "shell",
+        "command": "./ns3 configure --cxx-standard=17",
+        "options": {
+          "env": {
+            "CC": "/usr/bin/clang",
+            "CXX": "/usr/bin/clang++"
+          }
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "Build (Clang)",
+        "type": "shell",
+        "command": "./ns3 build",
+        "dependsOn": "Configure (Clang, C++17)"
+      },
+      {
+        "label": "Run tests",
+        "type": "shell",
+        "command": "./test.py",
+        "group": { "kind": "test", "isDefault": true }
+      }
     ]
-}
+  }

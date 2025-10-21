@@ -810,10 +810,9 @@ Txop::NotifySleep(uint8_t linkId)
 }
 
 void
-Txop::NotifyOff()
+Txop::NotifyOff(uint8_t linkId)
 {
-    NS_LOG_FUNCTION(this);
-    m_queue->Flush();
+    NS_LOG_FUNCTION(this << linkId);
 }
 
 void

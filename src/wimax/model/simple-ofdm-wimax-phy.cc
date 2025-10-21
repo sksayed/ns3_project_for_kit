@@ -543,7 +543,7 @@ SimpleOfdmWimaxPhy::ConvertBitsToBurst(Bvec buffer)
         j++;
     }
     uint16_t pos = 0;
-    Ptr<PacketBurst> RecvBurst = Create<PacketBurst>();
+    Ptr<PacketBurst> RecvBurst = CreateObject<PacketBurst>();
     while (pos < bufferSize)
     {
         uint16_t packetSize = 0;
@@ -668,7 +668,7 @@ SimpleOfdmWimaxPhy::CalculateDataRate(WimaxPhy::ModulationType modulationType) c
     auto bitsTransmittedPerSymbol = (uint16_t)(bitsPerSymbol * GetNrCarriers() * fecCode);
     // 96, 192, 288, 384, 576, 767 and 864 bits per symbol for the seven modulations, respectively
 
-    return (uint32_t)symbolsPerSecond * bitsTransmittedPerSymbol;
+    return (uint32_t)(symbolsPerSecond * bitsTransmittedPerSymbol);
 }
 
 uint32_t

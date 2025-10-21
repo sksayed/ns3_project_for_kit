@@ -12,6 +12,26 @@ Note that users who upgrade the simulator across versions, or who work directly 
 
 This file is a best-effort approach to solving this issue; we will do our best but can guarantee that there will be things that fall through the cracks, unfortunately. If you, as a user, can suggest improvements to this file based on your experience, please contribute a patch or drop us a note on ns-developers mailing list.
 
+## Changes from ns-3.45 to ns-3-dev
+
+### New API
+
+* (wifi) Added a new `EarlyTxopEndDetect` attribute to `EhtFrameExchangeManager` to control whether the Duration/ID value of the frame being transmitted or received by a device shall be used to early detect the end of an ongoing TXOP (held by another device).
+
+### Changes to existing API
+
+* (antenna) Reformatted documentation.
+* (internet) Added check for longest prefix match in GlobalRouting.
+* (lr-wpan) Debloat MAC PD-DATA.indication and reduce packet copies.
+* (zigbee) Added group table.
+* (zigbee) Added Groupcast (Multicast) support.
+
+### Changes to build system
+
+### Changed behavior
+
+* (internet) The Ipv[4,6]RawSocket now reflects the Linux implementation, meaning that fragmented packets are reassembled (fragments are not anymore received by the socket), and packets that are simply forwarded are not received by the socket either (fixes #809).
+
 ## Changes from ns-3.44 to ns-3.45
 
 ### New API
