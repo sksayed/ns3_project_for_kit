@@ -189,6 +189,9 @@ add_subdirectory(examples)
 # Build scratch/simulation scripts
 add_subdirectory(scratch)
 
+# Build 5G simulations
+add_subdirectory(5g/src)
+
 # Build test utils
 add_subdirectory(utils)
 

@@ -2,48 +2,85 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_DIR="$ROOT_DIR/wifi_mesh_outputs"
+OUT_DIR="$ROOT_DIR/wifi_mesh_backhaul_outputs"
 NS3_CMD="$ROOT_DIR/ns3"
-PROJECT_DIR="$ROOT_DIR/pic_lab_project"
 ANALYZER_DIR="$ROOT_DIR/wifi_mesh_analyzer"
-SCRATCH_DIR="$ROOT_DIR/scratch"
-SIM_NAME="wifi_mesh_playfield_traces_fixed"
+SIM_NAME="tcp_mesh_backhaul_mode"
 
-echo "[1/5] Running simulation: $SIM_NAME"
-# Copy file to scratch temporarily for ns-3 launcher
-cp "$PROJECT_DIR/$SIM_NAME.cc" "$SCRATCH_DIR/$SIM_NAME.cc"
-"$NS3_CMD" run "scratch/$SIM_NAME" | cat || true
+echo "=========================================="
+echo "WiFi Mesh Backhaul Simulation Pipeline"
+echo "=========================================="
+echo "Simulation: $SIM_NAME (9 APs Optimized Mesh with TCP+UDP)"
+echo "Output Directory: $OUT_DIR"
+echo ""
 
-echo "[2/5] Running trace analyzer (analyze_traces.py)"
-python3 "$ANALYZER_DIR/analyze_traces.py" | cat || true
+echo "[1/3] Running simulation: $SIM_NAME"
+"$NS3_CMD" run "$SIM_NAME" --no-build || {
+    echo "Building and running simulation..."
+    "$NS3_CMD" run "$SIM_NAME"
+}
 
-## Removed FlowMonitor notebook execution step (no notebook present)
+echo ""
+echo "[2/3] Running enhanced visualizer (professional plots + HTML)"
+echo "   • Network topology, throughput heatmap, hop count analysis"
+echo "   • Transmission analysis, performance dashboard, HTML report"
+python3 "$ANALYZER_DIR/enhanced_visualizer.py" || echo "⚠️ Enhanced visualizer failed"
 
-echo "[3/5] Running PCAP TCP path analyzer if PCAPs exist"
-if ls "$OUT_DIR" | grep -q "wifi_mesh_playfield_rw_pcap"; then
-  python3 "$ANALYZER_DIR/analyze_pcap_tcp_paths.py" | cat || true
-else
-  echo "No PCAPs found; skipping PCAP-based TCP path analysis."
+echo ""
+echo "[3/3] Creating network animation (optional)"
+python3 "$ANALYZER_DIR/wifi_mesh_backhaul_animation.py" || echo "⚠️ Animation generator failed (optional)"
+
+# Note: Old topology analyzer archived as wifi_mesh_backhaul_analyzer_OLD_4AP.py.bak
+# It's specific to the old 4-AP topology and is no longer used
+
+echo ""
+echo "=========================================="
+echo "Pipeline Complete!"
+echo "=========================================="
+echo ""
+echo "📁 Output Directory: $OUT_DIR"
+echo ""
+
+# Count generated files
+XML_COUNT=$(ls "$OUT_DIR"/*.xml 2>/dev/null | wc -l)
+PCAP_COUNT=$(ls "$OUT_DIR"/*.pcap 2>/dev/null | wc -l)
+PNG_COUNT=$(ls "$OUT_DIR"/*.png 2>/dev/null | wc -l)
+HTML_COUNT=$(ls "$OUT_DIR"/*.html 2>/dev/null | wc -l)
+GIF_COUNT=$(ls "$OUT_DIR"/*.gif 2>/dev/null | wc -l)
+
+echo "📊 Generated Files:"
+echo "   • FlowMonitor XML: $XML_COUNT files"
+echo "   • PCAP captures: $PCAP_COUNT files"
+echo "   • PNG visualizations: $PNG_COUNT files"
+echo "   • HTML reports: $HTML_COUNT files"
+echo "   • Animations: $GIF_COUNT files"
+echo ""
+
+echo "🎯 Key Analysis Files:"
+if [ -f "$OUT_DIR/analysis_report.html" ]; then
+    echo "   ✅ analysis_report.html (Main report - open this!)"
+fi
+if [ -f "$OUT_DIR/performance_dashboard.png" ]; then
+    echo "   ✅ performance_dashboard.png (Comprehensive dashboard)"
+fi
+if [ -f "$OUT_DIR/network_topology.png" ]; then
+    echo "   ✅ network_topology.png (Auto-detected topology)"
+fi
+if [ -f "$OUT_DIR/hop_count_analysis.png" ]; then
+    echo "   ✅ hop_count_analysis.png (Multi-hop analysis)"
+fi
+if [ -f "$OUT_DIR/throughput_heatmap.png" ]; then
+    echo "   ✅ throughput_heatmap.png (Time-based heatmap)"
+fi
+if [ -f "$OUT_DIR/transmission_analysis.png" ]; then
+    echo "   ✅ transmission_analysis.png (Efficiency analysis)"
+fi
+if [ -f "$OUT_DIR/wifi_mesh_backhaul_animation.gif" ]; then
+    echo "   ✅ wifi_mesh_backhaul_animation.gif (Network animation)"
 fi
 
-echo "[4/5] Running enhanced visualizer"
-python3 "$ANALYZER_DIR/enhanced_visualizer.py" | cat || true
-
-echo "[5/5] Listing key outputs"
-ls -l "$OUT_DIR" | sed -n \
-  -e '/analysis_report.html/p' \
-  -e '/performance_dashboard.png/p' \
-  -e '/network_topology.png/p' \
-  -e '/throughput_heatmap.png/p' \
-  -e '/tr_mac_throughput.png/p' \
-  -e '/tr_rate_distribution.png/p' \
-  -e '/flowmon-wifi-mesh-playfield-rw.xml/p' || true
-
-echo "Done. Outputs are under $OUT_DIR"
-
-echo "Open enhanced report: firefox $OUT_DIR/analysis_report.html"
-
-# Clean up: remove temporary file from scratch
-echo "Cleaning up temporary files..."
-rm -f "$SCRATCH_DIR/$SIM_NAME.cc"
-echo "Cleanup complete."
+echo ""
+echo "🌐 Open Main Report:"
+echo "   firefox $OUT_DIR/analysis_report.html"
+echo ""
+echo "✅ All analysis complete!"

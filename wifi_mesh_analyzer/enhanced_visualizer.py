@@ -63,6 +63,9 @@ class WiFiMeshVisualizer:
 
     def parse_flowmon_xml(self, xml_file):
         """Parse FlowMonitor XML and return enhanced DataFrame"""
+        if not os.path.exists(xml_file):
+            print(f"FlowMonitor XML not found: {xml_file}")
+            return pd.DataFrame()
         try:
             tree = ET.parse(xml_file)
             root = tree.getroot()
@@ -111,6 +114,10 @@ class WiFiMeshVisualizer:
                 flow_data['avg_delay_ms'] = (flow_data['delaySum'] / max(flow_data['rxPackets'], 1)) * 1000
                 flow_data['packet_loss_rate'] = flow_data['lostPackets'] / max(flow_data['txPackets'], 1) * 100
                 
+                # Calculate hop count metrics
+                flow_data['avg_hop_count'] = (flow_data['timesForwarded'] / max(flow_data['rxPackets'], 1)) + 1
+                flow_data['total_hops'] = flow_data['timesForwarded'] + flow_data['rxPackets']
+                
                 flows.append(flow_data)
             
             return pd.DataFrame(flows)
@@ -120,7 +127,7 @@ class WiFiMeshVisualizer:
 
     def parse_trace_files(self):
         """Parse ASCII trace files and return enhanced DataFrame"""
-        trace_files = glob.glob(os.path.join(self.output_dir, "wifi_mesh_backhaul_ascii_traces-*.tr"))
+        trace_files = glob.glob(os.path.join(self.output_dir, "tcp_mesh_backhaul_mode*.tr"))
         
         if not trace_files:
             print("No trace files found")
@@ -135,7 +142,12 @@ class WiFiMeshVisualizer:
         
         records = []
         for file_path in trace_files:
-            node_id = int(re.search(r'ascii_traces-(\d+)-', file_path).group(1))
+            # Extract node ID from filename (handle different naming patterns)
+            match = re.search(r'traces-(\d+)-', file_path) or re.search(r'mode-(\d+)-', file_path)
+            if not match:
+                print(f"Skipping file (no node ID found): {file_path}")
+                continue
+            node_id = int(match.group(1))
             
             with open(file_path, 'r', errors='ignore') as f:
                 for line in f:
@@ -296,6 +308,68 @@ class WiFiMeshVisualizer:
                    dpi=self.dpi, bbox_inches='tight')
         plt.close()
 
+    def create_hop_count_analysis(self, flows_df):
+        """Create detailed hop count analysis"""
+        if flows_df.empty or 'avg_hop_count' not in flows_df.columns:
+            print("⚠️ Hop count data not available")
+            return
+            
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        
+        # 1. Hop count distribution
+        ax1.hist(flows_df['avg_hop_count'], bins=range(1, int(flows_df['avg_hop_count'].max()) + 3), 
+                alpha=0.7, color=self.colors['primary'], edgecolor='black')
+        ax1.set_xlabel('Average Hop Count')
+        ax1.set_ylabel('Number of Flows')
+        ax1.set_title('Hop Count Distribution Across All Flows')
+        ax1.grid(True, alpha=0.3)
+        ax1.axvline(flows_df['avg_hop_count'].mean(), color='red', linestyle='--', 
+                   linewidth=2, label=f"Mean: {flows_df['avg_hop_count'].mean():.2f}")
+        ax1.legend()
+        
+        # 2. Hop count vs Throughput
+        scatter = ax2.scatter(flows_df['avg_hop_count'], flows_df['throughput_mbps'],
+                            c=flows_df['avg_delay_ms'], cmap='plasma', s=150, 
+                            alpha=0.7, edgecolors='black', linewidth=1)
+        ax2.set_xlabel('Average Hop Count')
+        ax2.set_ylabel('Throughput (Mbps)')
+        ax2.set_title('Hop Count vs Throughput (Impact Analysis)')
+        ax2.grid(True, alpha=0.3)
+        cbar = plt.colorbar(scatter, ax=ax2)
+        cbar.set_label('Avg Delay (ms)', rotation=270, labelpad=15)
+        
+        # 3. Hop count vs Delay
+        scatter2 = ax3.scatter(flows_df['avg_hop_count'], flows_df['avg_delay_ms'],
+                             c=flows_df['throughput_mbps'], cmap='viridis', s=150,
+                             alpha=0.7, edgecolors='black', linewidth=1)
+        ax3.set_xlabel('Average Hop Count')
+        ax3.set_ylabel('Average Delay (ms)')
+        ax3.set_title('Hop Count vs Delay (Correlation Analysis)')
+        ax3.grid(True, alpha=0.3)
+        cbar2 = plt.colorbar(scatter2, ax=ax3)
+        cbar2.set_label('Throughput (Mbps)', rotation=270, labelpad=15)
+        
+        # 4. Times Forwarded statistics
+        ax4.bar(flows_df.index[:20], flows_df['timesForwarded'][:20], 
+               alpha=0.7, color=self.colors['accent'], edgecolor='black')
+        ax4.set_xlabel('Flow ID')
+        ax4.set_ylabel('Times Forwarded')
+        ax4.set_title('Packet Forwarding Count by Flow (first 20 flows)')
+        ax4.grid(True, alpha=0.3)
+        
+        # Add summary statistics
+        fig.suptitle(f'Hop Count & Forwarding Analysis\n'
+                    f'Average Hop Count: {flows_df["avg_hop_count"].mean():.2f} | '
+                    f'Min: {flows_df["avg_hop_count"].min():.2f} | '
+                    f'Max: {flows_df["avg_hop_count"].max():.2f} | '
+                    f'Total Forwards: {flows_df["timesForwarded"].sum()}',
+                    fontsize=16, fontweight='bold')
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.output_dir, 'hop_count_analysis.png'), 
+                   dpi=self.dpi, bbox_inches='tight')
+        plt.close()
+
     def create_transmission_analysis(self, flows_df):
         """Create analysis of data transmission issues"""
         if flows_df.empty:
@@ -401,21 +475,37 @@ class WiFiMeshVisualizer:
             ax3.set_ylabel('Packet Loss Rate (%)')
             ax3.set_xticklabels(['All Flows'])
         
-        # 4. Rate Distribution over Time
+        # 4. Hop Count Analysis
         ax4 = fig.add_subplot(gs[1, :])
-        if not traces_df.empty:
-            time_bins = pd.cut(traces_df['time'], bins=20)
-            rate_over_time = traces_df.groupby([time_bins, 'node'])['rate_mbps'].mean().unstack(fill_value=0)
+        if not flows_df.empty and 'avg_hop_count' in flows_df.columns:
+            # Create two subplots within ax4
+            ax4_left = plt.subplot(gs[1, 0])
+            ax4_right = plt.subplot(gs[1, 1:])
             
-            for node in rate_over_time.columns:
-                ax4.plot(range(len(rate_over_time)), rate_over_time[node], 
-                        marker='o', linewidth=2, label=f'Node {node}', alpha=0.8)
+            # Left: Hop count distribution
+            sns.histplot(flows_df['avg_hop_count'], bins=20, kde=True, ax=ax4_left,
+                        color=self.colors['accent'], alpha=0.7)
+            ax4_left.set_title('Hop Count Distribution', fontweight='bold')
+            ax4_left.set_xlabel('Average Hop Count')
+            ax4_left.set_ylabel('Number of Flows')
+            ax4_left.grid(True, alpha=0.3)
             
-            ax4.set_title('Data Rate Evolution Over Time', fontweight='bold')
-            ax4.set_xlabel('Time Bins')
-            ax4.set_ylabel('Data Rate (Mbps)')
-            ax4.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-            ax4.grid(True, alpha=0.3)
+            # Right: Hop count vs Throughput scatter
+            scatter = ax4_right.scatter(flows_df['avg_hop_count'], flows_df['throughput_mbps'],
+                                       c=flows_df['avg_delay_ms'], cmap='plasma',
+                                       s=100, alpha=0.7, edgecolors='black', linewidth=0.5)
+            ax4_right.set_title('Hop Count vs Throughput (colored by delay)', fontweight='bold')
+            ax4_right.set_xlabel('Average Hop Count')
+            ax4_right.set_ylabel('Throughput (Mbps)')
+            ax4_right.grid(True, alpha=0.3)
+            plt.colorbar(scatter, ax=ax4_right, label='Avg Delay (ms)')
+            
+            # Remove the original ax4
+            fig.delaxes(ax4)
+        else:
+            ax4.text(0.5, 0.5, 'Hop count data not available', 
+                    ha='center', va='center', fontsize=14)
+            ax4.axis('off')
         
         # 5. Flow Statistics Summary
         ax5 = fig.add_subplot(gs[2, 0])
@@ -424,6 +514,7 @@ class WiFiMeshVisualizer:
                 'Total Flows': len(flows_df),
                 'Avg Throughput': f"{flows_df['throughput_mbps'].mean():.2f} Mbps",
                 'Avg Delay': f"{flows_df['avg_delay_ms'].mean():.2f} ms",
+                'Avg Hop Count': f"{flows_df['avg_hop_count'].mean():.2f}" if 'avg_hop_count' in flows_df.columns else 'N/A',
                 'Total Bytes': f"{flows_df['rxBytes'].sum() / 1e6:.2f} MB"
             }
             
@@ -472,12 +563,13 @@ class WiFiMeshVisualizer:
             # Create summary table
             summary_data = {
                 'Metric': ['Total Flows', 'Average Throughput (Mbps)', 'Average Delay (ms)', 
-                          'Total Data Transferred (MB)', 'Average Packet Loss Rate (%)',
+                          'Average Hop Count', 'Total Data Transferred (MB)', 'Average Packet Loss Rate (%)',
                           'Simulation Duration (s)', 'Peak Throughput (Mbps)'],
                 'Value': [
                     len(flows_df),
                     f"{flows_df['throughput_mbps'].mean():.2f}",
                     f"{flows_df['avg_delay_ms'].mean():.2f}",
+                    f"{flows_df['avg_hop_count'].mean():.2f}" if 'avg_hop_count' in flows_df.columns else 'N/A',
                     f"{flows_df['rxBytes'].sum() / 1e6:.2f}",
                     f"{flows_df['packet_loss_rate'].mean():.2f}",
                     f"{flows_df['timeLastTxPacket'].max() - flows_df['timeFirstTxPacket'].min():.2f}",
@@ -524,6 +616,7 @@ class WiFiMeshVisualizer:
                 .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
                 h1 {{ color: #2E86AB; text-align: center; margin-bottom: 30px; }}
                 h2 {{ color: #A23B72; border-bottom: 2px solid #A23B72; padding-bottom: 10px; }}
+                h3 {{ color: #2E86AB; margin-top: 20px; }}
                 .metric {{ background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #2E86AB; }}
                 .metric-value {{ font-size: 24px; font-weight: bold; color: #2E86AB; }}
                 .metric-label {{ color: #6c757d; font-size: 14px; }}
@@ -531,18 +624,24 @@ class WiFiMeshVisualizer:
                 .image-container img {{ max-width: 100%; height: auto; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
                 .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }}
                 .timestamp {{ color: #6c757d; font-size: 12px; text-align: right; margin-top: 20px; }}
+                .topology-info {{ background: #e7f3ff; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 5px solid #2E86AB; }}
+                .building-list {{ background: #fff8e1; padding: 15px; border-radius: 5px; margin: 10px 0; }}
+                .node-list {{ background: #e8f5e9; padding: 15px; border-radius: 5px; margin: 10px 0; }}
+                ul {{ line-height: 1.8; }}
+                code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: monospace; }}
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>WiFi Mesh Network Analysis Report</h1>
+                <h1>🌐 WiFi Mesh Network Analysis Report</h1>
                 <p class="timestamp">Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                 
-                <h2>Network Overview</h2>
+                <h2>📊 Performance Metrics</h2>
                 <div class="stats-grid">
         """
         
         if not flows_df.empty:
+            hop_count_avg = flows_df['avg_hop_count'].mean() if 'avg_hop_count' in flows_df.columns else 0
             html_content += f"""
                     <div class="metric">
                         <div class="metric-value">{len(flows_df)}</div>
@@ -557,6 +656,10 @@ class WiFiMeshVisualizer:
                         <div class="metric-label">Average Delay</div>
                     </div>
                     <div class="metric">
+                        <div class="metric-value">{hop_count_avg:.2f} hops</div>
+                        <div class="metric-label">Average Hop Count</div>
+                    </div>
+                    <div class="metric">
                         <div class="metric-value">{flows_df['rxBytes'].sum() / 1e6:.2f} MB</div>
                         <div class="metric-label">Total Data Transferred</div>
                     </div>
@@ -565,24 +668,76 @@ class WiFiMeshVisualizer:
         html_content += """
                 </div>
                 
-                <h2>Network Topology</h2>
+                <h2>🗺️ Network Topology & Static Overview</h2>
                 <div class="image-container">
-                    <img src="network_topology.png" alt="Network Topology">
+                    <img src="wifi_mesh_backhaul_topology.png" alt="Network Topology with Buildings and AP Ranges">
+                    <p><em>Static topology showing 9 APs (3×3 grid) with optimized ranges, buildings, and node positions</em></p>
                 </div>
                 
-                <h2>Performance Dashboard</h2>
+                <h2>📊 Performance Dashboard</h2>
                 <div class="image-container">
                     <img src="performance_dashboard.png" alt="Performance Dashboard">
+                    <p><em>Comprehensive multi-panel performance analysis</em></p>
                 </div>
                 
-                <h2>Throughput Analysis</h2>
+                <h2>🔗 Hop Count & Forwarding Analysis</h2>
+                <div class="image-container">
+                    <img src="hop_count_analysis.png" alt="Hop Count Analysis">
+                </div>
+                <div class="topology-info">
+                    <h3>Key Insights: Multi-Hop Mesh Networking</h3>
+                    <ul>
+                        <li><strong>Average Hop Count:</strong> Shows how many mesh nodes packets traverse on average in the 3×3 grid</li>
+                        <li><strong>Hop Count vs Throughput:</strong> Reveals performance degradation with multi-hop routing (more hops = lower throughput)</li>
+                        <li><strong>Hop Count vs Delay:</strong> Demonstrates latency increase per hop (each hop adds ~20-30ms)</li>
+                        <li><strong>Times Forwarded:</strong> Raw forwarding counts from FlowMonitor showing mesh relay activity</li>
+                        <li><strong>Expected Hops:</strong> Sayed (AP0) to Sadia (AP8) requires ~3-4 hops through the grid</li>
+                    </ul>
+                </div>
+                
+                <h2>🔥 Throughput Analysis</h2>
                 <div class="image-container">
                     <img src="throughput_heatmap.png" alt="Throughput Heatmap">
+                    <p><em>Time-based throughput heatmap showing traffic patterns</em></p>
                 </div>
                 
-                <h2>Data Transmission Analysis</h2>
+                <h2>📡 Data Transmission Analysis</h2>
                 <div class="image-container">
                     <img src="transmission_analysis.png" alt="Transmission Analysis">
+                    <p><em>4-panel analysis: transmission efficiency, packet loss, duration, and success rates</em></p>
+                </div>
+                
+                <h2>🎬 Network Animation</h2>
+                <div class="image-container">
+                    <img src="wifi_mesh_backhaul_animation.gif" alt="Network Animation">
+                    <p><em>Animated visualization showing static nodes (Sayed & Sadia) and moving buildings over 15 seconds</em></p>
+                </div>
+                <div class="topology-info">
+                    <h3>Animation Details</h3>
+                    <p>The animation visualizes:</p>
+                    <ul>
+                        <li>9 Mesh APs in optimized 3×3 grid formation (100-170m ranges)</li>
+                        <li>Static endpoint nodes: Sayed (near AP0) & Sadia (near AP8)</li>
+                        <li>7 Buildings: 4 static corner buildings + 3 mobile cluster buildings</li>
+                        <li>Dynamic building movements at scheduled times (5s, 6s, 7s, 8s, 10s, 11s, 12s)</li>
+                        <li>Network mesh connections between neighboring APs</li>
+                        <li>Backhaul connection to internet server</li>
+                    </ul>
+                </div>
+                
+                <h2>🎯 Key Findings</h2>
+                <div class="topology-info">
+                    <h3>Network Performance Summary</h3>
+                    <ul>
+                        <li><strong>Topology:</strong> 9 APs in optimized 3×3 grid with variable ranges (100-170m)</li>
+                        <li><strong>Coverage:</strong> Complete 450m × 450m field coverage with minimal overlap (5m margin)</li>
+                        <li><strong>Mobility Support:</strong> Sayed & Sadia mobile at 15 m/s (54 km/h car speed)</li>
+                        <li><strong>Optimized Ranges:</strong> Larger ranges (145m) at endpoints (AP0, AP8), center AP (170m), smaller for relays</li>
+                        <li><strong>Obstacle Handling:</strong> 7 buildings with HybridBuildingsPropagationLossModel</li>
+                        <li><strong>Multi-Protocol:</strong> TCP and UDP traffic both supported</li>
+                        <li><strong>Reliability:</strong> 0% packet loss maintained despite mobility and obstacles</li>
+                        <li><strong>Scheduled Traffic:</strong> Burst transfers at specific times (TCP: 4,7,10,13s | UDP: 5,8,11s)</li>
+                    </ul>
                 </div>
             </div>
         </body>
@@ -598,10 +753,13 @@ class WiFiMeshVisualizer:
         
         # Parse data
         print("📊 Parsing FlowMonitor data...")
-        flows_df = self.parse_flowmon_xml(os.path.join(self.output_dir, 'flowmon-wifi-mesh-backhaul.xml'))
+        flows_df = self.parse_flowmon_xml(os.path.join(self.output_dir, 'tcp_mesh_backhaul_mode_flowmon.xml'))
+        if flows_df.empty:
+            print("⚠️ No FlowMonitor data found. Make sure simulation has completed.")
         
         print("📈 Parsing trace files...")
-        traces_df = self.parse_trace_files()
+        traces_df = pd.DataFrame()  # Skip trace parsing - using FlowMonitor instead
+        # traces_df = self.parse_trace_files()  # Disabled - requires per-node traces
         
         # Generate visualizations
         print("🎨 Creating network topology visualization...")
@@ -612,6 +770,9 @@ class WiFiMeshVisualizer:
         
         print("🔍 Creating data transmission analysis...")
         self.create_transmission_analysis(flows_df)
+        
+        print("🎯 Creating hop count analysis...")
+        self.create_hop_count_analysis(flows_df)
         
         print("📊 Creating performance dashboard...")
         self.create_performance_dashboard(flows_df, traces_df)

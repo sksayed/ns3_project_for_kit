@@ -14,13 +14,13 @@ from datetime import datetime
 class WiFiMeshBackhaulAnimator:
     def __init__(self, output_dir="wifi_mesh_backhaul_outputs"):
         self.output_dir = output_dir
-        self.field_size = 400.0
+        self.field_size = 450.0
         
         # Network topology parameters (matching C++ code)
-        self.n_mesh_hops = 4
-        self.n_sta_per_mesh = 2
-        self.n_total_stas = self.n_mesh_hops * self.n_sta_per_mesh
-        self.n_total_nodes = 1 + self.n_mesh_hops + self.n_total_stas + 2  # backhaul + mesh + STA + Sayed/Sadia
+        self.n_mesh_hops = 9  # 3x3 grid of APs
+        self.n_sta_per_mesh = 0
+        self.n_total_stas = 0  # No STAs
+        self.n_total_nodes = 1 + self.n_mesh_hops + self.n_total_stas + 2  # backhaul + 9 APs + 0 STAs + Sayed/Sadia = 12
         
         # Node positions (will be updated during animation)
         self.initial_node_positions = self._generate_node_positions()
@@ -36,12 +36,12 @@ class WiFiMeshBackhaulAnimator:
             "cluster50": 18.0,    # 18m high (tallest)
         }
         
-        # Static buildings (corner buildings that don't move)
+        # Static buildings (corner buildings that don't move) - matching C++ lines 155-165
         self.static_buildings = [
-            {"name": "leftBelow", "x": 0.0, "y": 96.0, "w": 60.0, "h": 8.0},
-            {"name": "rightBelow", "x": 340.0, "y": 96.0, "w": 60.0, "h": 8.0},
-            {"name": "leftAbove", "x": 0.0, "y": 296.0, "w": 60.0, "h": 8.0},
-            {"name": "rightAbove", "x": 340.0, "y": 296.0, "w": 60.0, "h": 8.0},
+            {"name": "leftBelow", "x": 0.0, "y": 96.0, "w": 60.0, "h": 8.0, "height": 10.0},
+            {"name": "rightBelow", "x": 340.0, "y": 96.0, "w": 60.0, "h": 8.0, "height": 10.0},
+            {"name": "leftAbove", "x": 0.0, "y": 296.0, "w": 60.0, "h": 8.0, "height": 10.0},
+            {"name": "rightAbove", "x": 340.0, "y": 296.0, "w": 60.0, "h": 8.0, "height": 10.0},
         ]
         
         # Mobile buildings
@@ -52,13 +52,13 @@ class WiFiMeshBackhaulAnimator:
         ]
         
         # Animation parameters
-        self.duration = 10.0  # seconds (updated to match C++ code)
+        self.duration = 15.0  # seconds (updated to match C++ code)
         self.fps = 2  # frames per second
         self.total_frames = int(self.duration * self.fps)
         
         # Node movement simulation (RandomWalk2d parameters from C++ code)
-        self.node_speed = 50.0  # m/s (from C++ code)
-        self.node_bounds = (0, 400, 0, 400)  # Rectangle bounds
+        self.node_speed = 15.0  # m/s (from C++ code - updated to static nodes)
+        self.node_bounds = (0, 450, 0, 450)  # Rectangle bounds
         self.node_time_step = 1.0  # seconds (from C++ code)
         
         # Node trails for movement visualization
@@ -72,48 +72,30 @@ class WiFiMeshBackhaulAnimator:
         """Generate node positions matching C++ code layout"""
         positions = []
         
-        # Backhaul node (node 0)
-        positions.append((30.0, self.field_size/2))
+        # Backhaul node (node 0) - at center
+        positions.append((self.field_size/2, self.field_size/2))  # (225, 225)
         
-        # Mesh hop nodes (nodes 1-4) - exact positions from C++ code
-        mesh_positions = [
-            (50.0, 10.0),    # Mesh0
-            (150.0, 200.0),  # Mesh1
-            (300.0, 390.0),  # Mesh2
-            (370.0, 160.0),  # Mesh3
-        ]
-        for pos in mesh_positions:
-            positions.append(pos)
+        # 9 Mesh APs in 3x3 grid (nodes 1-9)
+        grid_size = 3
+        ap_spacing = 150.0
+        offset = ap_spacing / 2.0  # = 75.0
         
-        # STA nodes (nodes 5-12) - positioned around mesh nodes
-        for i in range(self.n_total_stas):
-            mesh_idx = i // self.n_sta_per_mesh
-            sta_idx = i % self.n_sta_per_mesh
-            
-            # Get mesh node position (exact coordinates from C++ code)
-            mesh_positions = [
-                (50.0, 10.0),    # Mesh0
-                (150.0, 200.0),  # Mesh1
-                (300.0, 390.0),  # Mesh2
-                (370.0, 160.0),  # Mesh3
-            ]
-            mesh_x, mesh_y = mesh_positions[mesh_idx]
-            
-            # Position STA around mesh node
-            angle = (sta_idx * 2 * np.pi) / self.n_sta_per_mesh
-            distance = 40.0  # Distance from mesh node
-            x = mesh_x + distance * np.cos(angle)
-            y = mesh_y + distance * np.sin(angle)
-            
-            # Ensure within bounds
-            x = max(10.0, min(self.field_size - 10.0, x))
-            y = max(10.0, min(self.field_size - 10.0, y))
-            
-            positions.append((x, y))
+        for row in range(grid_size):
+            for col in range(grid_size):
+                x = offset + col * ap_spacing
+                y = offset + row * ap_spacing
+                positions.append((x, y))
         
-        # Sayed and Sadia (nodes 13-14)
-        positions.append((0.0, 0.0))  # Sayed
-        positions.append((self.field_size, self.field_size))  # Sadia
+        # Results:
+        # AP0: (75, 75), AP1: (225, 75), AP2: (375, 75)
+        # AP3: (75, 225), AP4: (225, 225), AP5: (375, 225)
+        # AP6: (75, 375), AP7: (225, 375), AP8: (375, 375)
+        
+        # No STA nodes
+        
+        # Sayed and Sadia (nodes 10-11)
+        positions.append((80.0, 80.0))     # Sayed - near AP0
+        positions.append((370.0, 370.0))   # Sadia - near AP8
         
         return positions
     
@@ -121,75 +103,51 @@ class WiFiMeshBackhaulAnimator:
         """Define node types for visualization"""
         types = []
         types.append("Backhaul")  # node 0
-        for i in range(self.n_mesh_hops):
-            types.append(f"Mesh{i}")  # nodes 1-4
-        for i in range(self.n_total_stas):
-            types.append(f"STA{i}")  # nodes 5-12
-        types.append("Sayed")  # node 13
-        types.append("Sadia")  # node 14
+        for i in range(9):
+            types.append(f"AP{i}")  # nodes 1-9 (9 APs)
+        # No STA nodes
+        types.append("Sayed")  # node 10
+        types.append("Sadia")  # node 11
         return types
     
     def _define_node_colors(self):
         """Define colors for different node types"""
         colors = []
         colors.append('blue')  # Backhaul - blue
-        for i in range(self.n_mesh_hops):
-            colors.append('red')  # Mesh nodes - red
-        for i in range(self.n_total_stas):
-            colors.append('yellow')  # STA nodes - yellow
-        colors.append('cyan')  # Sayed - cyan (original blue)
+        for i in range(9):
+            colors.append('red')  # 9 APs - red
+        # No STA nodes
+        colors.append('cyan')  # Sayed - cyan
         colors.append('orange')  # Sadia - orange
         return colors
     
     def _create_building_schedule(self):
-        """Create building movement schedule matching C++ code (adjusted for 10s sim)"""
+        """Create building movement schedule matching C++ code (15s simulation)"""
         movements = {
             "cluster250a": [
-                {"time": 0.0, "x": 80.0, "y": 220.0},  # Initial position (moved left)
-                {"time": 2.0, "x": 150.0, "y": 180.0},
-                {"time": 4.0, "x": 250.0, "y": 130.0},
-                {"time": 7.0, "x": 100.0, "y": 280.0},
+                {"time": 0.0, "x": 80.0, "y": 220.0},   # Initial position
+                {"time": 5.0, "x": 150.0, "y": 180.0},  # Move at 5s
+                {"time": 8.0, "x": 250.0, "y": 130.0},  # Move at 8s
+                {"time": 12.0, "x": 100.0, "y": 280.0}, # Move at 12s
             ],
             "cluster250b": [
-                {"time": 0.0, "x": 170.0, "y": 220.0},  # Initial position (moved left)
-                {"time": 2.5, "x": 200.0, "y": 180.0},
-                {"time": 5.0, "x": 130.0, "y": 300.0},
+                {"time": 0.0, "x": 170.0, "y": 220.0},  # Initial position
+                {"time": 6.0, "x": 200.0, "y": 180.0},  # Move at 6s
+                {"time": 10.0, "x": 130.0, "y": 300.0}, # Move at 10s
             ],
             "cluster50": [
-                {"time": 0.0, "x": 255.0, "y": 20.0},  # Initial position (moved 15m more left)
-                {"time": 3.0, "x": 255.0, "y": 80.0},
-                {"time": 6.0, "x": 215.0, "y": 180.0},
+                {"time": 0.0, "x": 255.0, "y": 20.0},   # Initial position
+                {"time": 7.0, "x": 255.0, "y": 80.0},   # Move at 7s
+                {"time": 11.0, "x": 215.0, "y": 180.0}, # Move at 11s
             ]
         }
         return movements
     
     def _simulate_node_movement(self, time):
-        """Simulate node movement based on RandomWalk2d parameters"""
-        # Only STA nodes (nodes 5-12) are mobile
-        for i in range(5, 13):  # STA nodes
-            if i < len(self.node_positions):
-                # Simple random walk simulation
-                step_size = self.node_speed * (1.0 / self.fps)  # Distance per frame
-                angle = np.random.uniform(0, 2 * np.pi)
-                
-                dx = step_size * np.cos(angle)
-                dy = step_size * np.sin(angle)
-                
-                new_x = self.node_positions[i][0] + dx
-                new_y = self.node_positions[i][1] + dy
-                
-                # Keep within bounds
-                new_x = max(0, min(self.field_size, new_x))
-                new_y = max(0, min(self.field_size, new_y))
-                
-                self.node_positions[i] = (new_x, new_y)
-                
-                # Add to trail
-                self.node_trails[i].append((new_x, new_y))
-                
-                # Limit trail length
-                if len(self.node_trails[i]) > 20:
-                    self.node_trails[i].pop(0)
+        """Simulate node movement - ALL NODES ARE STATIC in this simulation"""
+        # No movement - Sayed, Sadia, all APs, and backhaul are static
+        # Buildings move but nodes don't
+        pass
     
     def _get_building_positions(self, time):
         """Get building positions at given time"""
@@ -203,7 +161,7 @@ class WiFiMeshBackhaulAnimator:
                 "y": building["y"],
                 "w": building["w"],
                 "h": building["h"],
-                "height": 10.0  # Default height
+                "height": building.get("height", 10.0)
             })
         
         # Mobile buildings
@@ -242,29 +200,37 @@ class WiFiMeshBackhaulAnimator:
         return buildings
     
     def _draw_network_connections(self, ax):
-        """Draw network connections"""
-        # Draw backhaul connection to first mesh node only (Mesh0) - RED
+        """Draw network connections for 3x3 mesh grid"""
         backhaul_pos = self.node_positions[0]
-        mesh0_pos = self.node_positions[1]  # Mesh0 is node 1
-        ax.plot([backhaul_pos[0], mesh0_pos[0]], [backhaul_pos[1], mesh0_pos[1]], 
+        
+        # Draw backhaul to center AP (AP4 at index 5)
+        center_ap_pos = self.node_positions[5]  # AP4 is at index 5 (1 backhaul + 4 APs in grid order)
+        ax.plot([backhaul_pos[0], center_ap_pos[0]], 
+               [backhaul_pos[1], center_ap_pos[1]], 
                'r-', alpha=0.8, linewidth=4, label='Backhaul Link')
         
-        # Draw mesh hop chain connections (Mesh0 -> Mesh1 -> Mesh2 -> Mesh3)
-        for i in range(1, self.n_mesh_hops):
-            pos1 = self.node_positions[i]
-            pos2 = self.node_positions[i + 1]
-            ax.plot([pos1[0], pos2[0]], [pos1[1], pos2[1]], 
-                   'r-', alpha=0.6, linewidth=2, label='Mesh Chain' if i == 1 else "")
+        # Draw mesh connections (neighboring APs in 3x3 grid)
+        grid_size = 3
+        for row in range(grid_size):
+            for col in range(grid_size):
+                ap_idx = 1 + row * grid_size + col  # +1 for backhaul offset
+                
+                # Connect to right neighbor
+                if col < grid_size - 1:
+                    right_idx = ap_idx + 1
+                    ax.plot([self.node_positions[ap_idx][0], self.node_positions[right_idx][0]],
+                           [self.node_positions[ap_idx][1], self.node_positions[right_idx][1]],
+                           'b-', alpha=0.4, linewidth=1.5)
+                
+                # Connect to bottom neighbor
+                if row < grid_size - 1:
+                    bottom_idx = ap_idx + grid_size
+                    ax.plot([self.node_positions[ap_idx][0], self.node_positions[bottom_idx][0]],
+                           [self.node_positions[ap_idx][1], self.node_positions[bottom_idx][1]],
+                           'b-', alpha=0.4, linewidth=1.5)
         
-        # Draw STA to mesh connections
-        for i in range(5, 5 + self.n_total_stas):
-            sta_pos = self.node_positions[i]
-            mesh_idx = (i - 5) // self.n_sta_per_mesh + 1
-            mesh_pos = self.node_positions[mesh_idx]
-            ax.plot([sta_pos[0], mesh_pos[0]], [sta_pos[1], mesh_pos[1]], 
-                   'g--', alpha=0.2, linewidth=0.5)
-        
-        # Note: Sayed and Sadia communicate through the mesh network, no direct link
+        # No STA connections (no STAs in this simulation)
+        # Note: Sayed and Sadia communicate through the mesh network
     
     def animate_frame(self, frame):
         """Animation frame update function"""
@@ -285,7 +251,7 @@ class WiFiMeshBackhaulAnimator:
         self.ax.set_aspect('equal')
         self.ax.grid(True, alpha=0.3)
         self.ax.set_title(f'WiFi Mesh Backhaul Network - Time: {time:.1f}s\n'
-                         f'Backhaul→Mesh→STA + Sayed↔Sadia + Internet Server')
+                         f'9 APs (3×3 Grid) + Static Nodes + Moving Buildings')
         
         # Draw buildings
         for building in buildings:
@@ -306,24 +272,15 @@ class WiFiMeshBackhaulAnimator:
         # Draw network connections
         self._draw_network_connections(self.ax)
         
-        # Draw nodes with trails
+        # Draw nodes (no trails since all nodes are static)
         for i, (pos, node_type, color) in enumerate(zip(self.node_positions, self.node_types, self.node_colors)):
-            # Draw trail for mobile nodes
-            if i >= 5 and i < 13 and len(self.node_trails[i]) > 1:  # STA nodes
-                trail_x = [p[0] for p in self.node_trails[i]]
-                trail_y = [p[1] for p in self.node_trails[i]]
-                self.ax.plot(trail_x, trail_y, color=color, alpha=0.3, linewidth=1)
-            
             # Draw node
             if node_type == "Backhaul":
                 self.ax.scatter(pos[0], pos[1], c=color, s=200, marker='^', 
                               edgecolors='black', linewidth=2, label='Backhaul' if i == 0 else "")
-            elif node_type.startswith("Mesh"):
+            elif node_type.startswith("AP"):
                 self.ax.scatter(pos[0], pos[1], c=color, s=150, marker='s', 
-                              edgecolors='black', linewidth=2, label='Mesh Hops' if i == 1 else "")
-            elif node_type.startswith("STA"):
-                self.ax.scatter(pos[0], pos[1], c=color, s=100, marker='o', 
-                              edgecolors='black', linewidth=1, label='STA Nodes' if i == 5 else "")
+                              edgecolors='black', linewidth=2, label='Mesh APs' if i == 1 else "")
             elif node_type == "Sayed":
                 self.ax.scatter(pos[0], pos[1], c=color, s=180, marker='D', 
                               edgecolors='black', linewidth=2, label='Sayed')
@@ -333,13 +290,10 @@ class WiFiMeshBackhaulAnimator:
             
             # Add node labels
             if i == 0:  # Backhaul
-                self.ax.annotate('Backhaul\n(Gateway)', pos, xytext=(10, 10), 
+                self.ax.annotate('Backhaul', pos, xytext=(5, 10), 
                                textcoords='offset points', fontsize=8, weight='bold')
-            elif i >= 1 and i <= self.n_mesh_hops:  # Mesh nodes
-                self.ax.annotate(f'Mesh{i-1}', pos, xytext=(5, 5), 
-                               textcoords='offset points', fontsize=8)
-            elif i >= 5 and i < 5 + self.n_total_stas:  # STA nodes
-                self.ax.annotate(f'STA{i-5}', pos, xytext=(5, -15), 
+            elif i >= 1 and i <= 9:  # APs
+                self.ax.annotate(f'AP{i-1}', pos, xytext=(5, 5), 
                                textcoords='offset points', fontsize=7)
             elif node_type in ["Sayed", "Sadia"]:
                 self.ax.annotate(node_type, pos, xytext=(10, 10), 
@@ -362,8 +316,8 @@ class WiFiMeshBackhaulAnimator:
         self.ax.legend(loc='upper right', fontsize=8, framealpha=0.8)
         
         # Add time and statistics
-        stats_text = f"Time: {time:.1f}s | Nodes: {self.n_total_nodes} | " \
-                    f"Mesh Hops: {self.n_mesh_hops} | STA Nodes: {self.n_total_stas}"
+        stats_text = f"Time: {time:.1f}s | Total Nodes: {self.n_total_nodes} | " \
+                    f"Mesh APs: {self.n_mesh_hops} (3×3 grid) | Static Nodes"
         self.ax.text(0.02, 0.98, stats_text, transform=self.ax.transAxes, 
                     fontsize=10, verticalalignment='top',
                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
@@ -408,7 +362,46 @@ class WiFiMeshBackhaulAnimator:
         ax.set_ylim(-20, self.field_size + 100)  # Extra space for internet server
         ax.set_aspect('equal')
         ax.grid(True, alpha=0.3)
-        ax.set_title('WiFi Mesh Backhaul Network - Topology Overview', fontsize=14, weight='bold')
+        ax.set_title('WiFi Mesh Backhaul Network - 9 APs (3×3) with Optimized Ranges', 
+                    fontsize=14, weight='bold')
+        
+        # AP Ranges (matching the optimized ranges from C++ code)
+        ap_ranges = [
+            145.0,  # AP0 - Sayed corner (bottom-left)
+            120.0,  # AP1 - Edge
+            100.0,  # AP2 - Far corner
+            120.0,  # AP3 - Edge
+            170.0,  # AP4 - Center (key relay)
+            120.0,  # AP5 - Edge
+            100.0,  # AP6 - Far corner
+            120.0,  # AP7 - Edge
+            145.0   # AP8 - Sadia corner (top-right)
+        ]
+        
+        # Color mapping for different ranges (visual hierarchy)
+        range_colors = {
+            100.0: {'color': '#00CED1', 'name': 'Cyan'},      # Smallest - cyan
+            120.0: {'color': '#FFD700', 'name': 'Gold'},      # Medium - gold/yellow
+            145.0: {'color': '#FF8C00', 'name': 'Orange'},    # Large - orange
+            170.0: {'color': '#FF1493', 'name': 'DeepPink'}   # Largest - deep pink
+        }
+        
+        # Draw AP coverage circles first (before buildings)
+        for i in range(9):
+            ap_idx = i + 1  # APs are at indices 1-9
+            pos = self.initial_node_positions[ap_idx]
+            range_radius = ap_ranges[i]
+            range_color = range_colors[range_radius]['color']
+            
+            # Draw coverage circle with range-specific color
+            circle = plt.Circle(pos, range_radius, color=range_color, alpha=0.15, 
+                              linestyle='--', fill=True, linewidth=2)
+            ax.add_patch(circle)
+            
+            # Add range label with matching color
+            ax.text(pos[0], pos[1] - range_radius - 5, f'{range_radius:.0f}m', 
+                   ha='center', va='top', fontsize=8, color=range_color, weight='bold',
+                   bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor=range_color, linewidth=2))
         
         # Draw buildings at time 0
         buildings = self._get_building_positions(0.0)
@@ -430,30 +423,26 @@ class WiFiMeshBackhaulAnimator:
         for i, (pos, node_type, color) in enumerate(zip(self.initial_node_positions, self.node_types, self.node_colors)):
             if node_type == "Backhaul":
                 ax.scatter(pos[0], pos[1], c=color, s=200, marker='^', 
-                          edgecolors='black', linewidth=2, label='Backhaul Gateway')
-            elif node_type.startswith("Mesh"):
+                          edgecolors='black', linewidth=2, label='Backhaul Gateway', zorder=10)
+            elif node_type.startswith("AP"):
                 ax.scatter(pos[0], pos[1], c=color, s=150, marker='s', 
-                          edgecolors='black', linewidth=2, label='Mesh Hops' if i == 1 else "")
-            elif node_type.startswith("STA"):
-                ax.scatter(pos[0], pos[1], c=color, s=100, marker='o', 
-                          edgecolors='black', linewidth=1, label='STA Nodes' if i == 5 else "")
+                          edgecolors='black', linewidth=2, label='9 Mesh APs (3×3)' if i == 1 else "", zorder=10)
             elif node_type == "Sayed":
                 ax.scatter(pos[0], pos[1], c=color, s=180, marker='D', 
-                          edgecolors='black', linewidth=2, label='Sayed')
+                          edgecolors='black', linewidth=2, label='Sayed (Static)', zorder=10)
             elif node_type == "Sadia":
                 ax.scatter(pos[0], pos[1], c=color, s=180, marker='D', 
-                          edgecolors='black', linewidth=2, label='Sadia')
+                          edgecolors='black', linewidth=2, label='Sadia (Static)', zorder=10)
             
             # Add node labels
             if i == 0:
-                ax.annotate('Backhaul', pos, xytext=(10, 10), 
-                           textcoords='offset points', fontsize=10, weight='bold')
-            elif i >= 1 and i <= self.n_mesh_hops:
-                ax.annotate(f'Mesh{i-1}', pos, xytext=(5, 5), 
-                           textcoords='offset points', fontsize=9)
-            elif i >= 5 and i < 5 + self.n_total_stas:
-                ax.annotate(f'STA{i-5}', pos, xytext=(5, -15), 
-                           textcoords='offset points', fontsize=7)
+                ax.annotate('Backhaul', pos, xytext=(5, 10), 
+                           textcoords='offset points', fontsize=9, weight='bold')
+            elif i >= 1 and i <= 9:
+                # Add AP label with range info
+                ap_num = i - 1
+                ax.annotate(f'AP{ap_num}\n({ap_ranges[ap_num]:.0f}m)', pos, xytext=(5, 5), 
+                           textcoords='offset points', fontsize=7, weight='bold')
             elif node_type in ["Sayed", "Sadia"]:
                 ax.annotate(node_type, pos, xytext=(10, 10), 
                            textcoords='offset points', fontsize=10, weight='bold')
@@ -474,8 +463,22 @@ class WiFiMeshBackhaulAnimator:
         ax.plot([internet_x, backhaul_pos[0]], [internet_y, backhaul_pos[1]], 
                'g--', alpha=0.8, linewidth=3, label='Internet Link')
         
-        # Add legend
-        ax.legend(loc='upper right', fontsize=10)
+        # Add legend with range color information
+        # Create custom legend entries for AP ranges
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='blue', edgecolor='black', label='Backhaul Gateway'),
+            Patch(facecolor='red', edgecolor='black', label='9 Mesh APs (3×3)'),
+            Patch(facecolor='cyan', edgecolor='black', label='Sayed (Static)'),
+            Patch(facecolor='orange', edgecolor='black', label='Sadia (Static)'),
+            Patch(facecolor='green', edgecolor='black', label='Internet Server'),
+            Patch(facecolor='white', edgecolor='black', label='─────────'),  # Separator
+            Patch(facecolor='#00CED1', alpha=0.5, label='100m Range (Far Corners)'),
+            Patch(facecolor='#FFD700', alpha=0.5, label='120m Range (Edges)'),
+            Patch(facecolor='#FF8C00', alpha=0.5, label='145m Range (Endpoints)'),
+            Patch(facecolor='#FF1493', alpha=0.5, label='170m Range (Center)')
+        ]
+        ax.legend(handles=legend_elements, loc='upper right', fontsize=9, title='Network Elements & AP Ranges')
         
         
         # Save static overview
@@ -504,9 +507,10 @@ def main():
     print(f"Creating animation for {animator.duration}s simulation...")
     print(f"Network topology: {animator.n_total_nodes} nodes")
     print(f"- Backhaul: 1")
-    print(f"- Mesh hops: {animator.n_mesh_hops}")
-    print(f"- STA nodes: {animator.n_total_stas}")
-    print(f"- Sayed & Sadia: 2")
+    print(f"- Mesh APs: {animator.n_mesh_hops} (3×3 grid)")
+    print(f"- STA nodes: {animator.n_total_stas} (none)")
+    print(f"- Sayed & Sadia: 2 (static)")
+    print(f"- Buildings: 7 (4 static + 3 moving)")
     
     anim = animator.create_animation()
     

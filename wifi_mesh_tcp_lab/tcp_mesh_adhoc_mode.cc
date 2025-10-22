@@ -1,5 +1,5 @@
 /*
- * Simple TCP WiFi Mesh Test (Ad-hoc Mode - Working Version)
+ * TCP WiFi Mesh Test - Ad-hoc Mode (Working Version)
  * 
  * Network topology:
  *   STA1 (Sayed) ---- Mesh AP1 <---> Mesh AP2 ---- STA2 (Sadia)
@@ -20,7 +20,7 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("SimpleTcpWifiTest");
+NS_LOG_COMPONENT_DEFINE("TcpMeshAdhocMode");
 
 int main(int argc, char *argv[])
 {
@@ -36,9 +36,11 @@ int main(int argc, char *argv[])
     // Simulation parameters
     const double simTime = 10.0;
     const uint16_t tcpPort = 7000;
+    std::string outputDir = "wifi_mesh_tcp_lab/";
 
-    std::cout << "Starting Simple TCP WiFi Mesh Test (Ad-hoc Mode)..." << std::endl;
+    std::cout << "Starting TCP WiFi Mesh Test (Ad-hoc Mode)..." << std::endl;
     std::cout << "Simulation time: " << simTime << " seconds" << std::endl;
+    std::cout << "Output directory: " << outputDir << std::endl;
 
     // Create nodes (mesh with two APs)
     NodeContainer meshNodes;
@@ -124,9 +126,9 @@ int main(int argc, char *argv[])
     std::cout << "Populated routing tables" << std::endl;
 
     // Enable tracing
-    wifiPhy.EnablePcapAll("simple_tcp_wifi_test_adhoc");
+    wifiPhy.EnablePcapAll(outputDir + "tcp_mesh_adhoc_mode");
     AsciiTraceHelper ascii;
-    wifiPhy.EnableAsciiAll(ascii.CreateFileStream("simple_tcp_wifi_test_adhoc.tr"));
+    wifiPhy.EnableAsciiAll(ascii.CreateFileStream(outputDir + "tcp_mesh_adhoc_mode.tr"));
 
     std::cout << "Enabled tracing" << std::endl;
 
@@ -185,13 +187,13 @@ int main(int argc, char *argv[])
     }
 
     // Save FlowMonitor results
-    monitor->SerializeToXmlFile("simple_tcp_wifi_test_adhoc_flowmon.xml", true, true);
+    monitor->SerializeToXmlFile(outputDir + "tcp_mesh_adhoc_mode_flowmon.xml", true, true);
 
     std::cout << "\nSimulation completed!" << std::endl;
     std::cout << "Results saved to:" << std::endl;
-    std::cout << "  - FlowMonitor: simple_tcp_wifi_test_adhoc_flowmon.xml" << std::endl;
-    std::cout << "  - ASCII traces: simple_tcp_wifi_test_adhoc.tr" << std::endl;
-    std::cout << "  - PCAP files: simple_tcp_wifi_test_adhoc-*.pcap" << std::endl;
+    std::cout << "  - FlowMonitor: " << outputDir << "tcp_mesh_adhoc_mode_flowmon.xml" << std::endl;
+    std::cout << "  - ASCII traces: " << outputDir << "tcp_mesh_adhoc_mode.tr" << std::endl;
+    std::cout << "  - PCAP files: " << outputDir << "tcp_mesh_adhoc_mode-*.pcap" << std::endl;
 
     Simulator::Destroy();
     return 0;

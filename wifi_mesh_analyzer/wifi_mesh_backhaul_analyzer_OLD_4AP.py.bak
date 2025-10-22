@@ -15,9 +15,9 @@ from datetime import datetime
 class WiFiMeshBackhaulAnalyzer:
     def __init__(self, output_dir="wifi_mesh_backhaul_outputs"):
         self.output_dir = output_dir
-        self.field_size = 400.0
-        self.n_total_nodes = 15  # 1 backhaul + 4 mesh + 8 STA + 2 Sayed/Sadia
-        self.sim_time = 10.0  # seconds
+        self.field_size = 450.0
+        self.n_total_nodes = 12  # 1 backhaul + 9 mesh APs + 0 STA + 2 Sayed/Sadia
+        self.sim_time = 15.0  # seconds
         
         # Network topology
         self.node_types = {
@@ -27,8 +27,8 @@ class WiFiMeshBackhaulAnalyzer:
             13: "Sayed", 14: "Sadia"
         }
         
-        self.flowmon_file = os.path.join(output_dir, "flowmon-wifi-mesh-backhaul.xml")
-        self.ascii_file = os.path.join(output_dir, "wifi_mesh_backhaul_ascii_traces_mesh.tr")
+        self.flowmon_file = os.path.join(output_dir, "tcp_mesh_backhaul_mode_flowmon.xml")
+        self.ascii_file = os.path.join(output_dir, "tcp_mesh_backhaul_mode.tr")
         self.ipv4_file = os.path.join(output_dir, "ipv4-l3.tr")
         
     def analyze_flowmon_results(self):
@@ -129,6 +129,12 @@ class WiFiMeshBackhaulAnalyzer:
                                      df['delaySum'] / df['rxPackets'],
                                      0)
             
+            # Calculate hop count metrics
+            df['avg_hop_count'] = np.where(df['rxPackets'] > 0,
+                                          (df['timesForwarded'] / df['rxPackets']) + 1,
+                                          0)
+            df['total_hops'] = df['timesForwarded'] + df['rxPackets']
+            
             print(f"Found {len(df)} flows (UDP and TCP only)")
             
             # Print flow analysis summary
@@ -142,6 +148,17 @@ class WiFiMeshBackhaulAnalyzer:
             print(f"  - TCP flows: {len(tcp_flows)}")
             print(f"  - Successful flows: {len(successful_flows)}")
             print(f"  - Failed flows: {len(failed_flows)}")
+            
+            # Show hop count analysis
+            if len(successful_flows) > 0:
+                avg_hops = successful_flows['avg_hop_count'].mean()
+                min_hops = successful_flows['avg_hop_count'].min()
+                max_hops = successful_flows['avg_hop_count'].max()
+                print(f"\n  Hop Count Analysis (successful flows):")
+                print(f"  - Average hop count: {avg_hops:.2f}")
+                print(f"  - Min hop count: {min_hops:.2f}")
+                print(f"  - Max hop count: {max_hops:.2f}")
+                print(f"  - Total forwards: {successful_flows['timesForwarded'].sum()}")
             
             if len(failed_flows) > 0:
                 print("  - Failed flows analysis:")
@@ -385,15 +402,19 @@ class WiFiMeshBackhaulAnalyzer:
         axes[1, 0].set_ylabel('Number of Flows')
         axes[1, 0].grid(True, alpha=0.3)
         
-        # Throughput vs Delay scatter plot (only successful flows)
-        if not successful_flows.empty:
-            axes[1, 1].scatter(successful_flows['throughput'], successful_flows['avg_delay'], alpha=0.6, color='purple')
-            axes[1, 1].set_title(f'Throughput vs Average Delay\n({len(successful_flows)} successful flows)')
+        # Hop Count vs Throughput scatter plot (only successful flows)
+        if not successful_flows.empty and 'avg_hop_count' in successful_flows.columns:
+            scatter = axes[1, 1].scatter(successful_flows['avg_hop_count'], successful_flows['throughput'], 
+                                        c=successful_flows['avg_delay'], cmap='viridis',
+                                        alpha=0.6, s=100, edgecolors='black', linewidth=0.5)
+            axes[1, 1].set_title(f'Hop Count vs Throughput (color=delay)\n({len(successful_flows)} successful flows)')
+            axes[1, 1].set_xlabel('Average Hop Count')
+            axes[1, 1].set_ylabel('Throughput (Mbps)')
+            cbar = plt.colorbar(scatter, ax=axes[1, 1])
+            cbar.set_label('Avg Delay (s)', rotation=270, labelpad=15)
         else:
             axes[1, 1].text(0.5, 0.5, 'No successful flows', ha='center', va='center', transform=axes[1, 1].transAxes)
-            axes[1, 1].set_title('Throughput vs Average Delay\n(No successful flows)')
-        axes[1, 1].set_xlabel('Throughput (Mbps)')
-        axes[1, 1].set_ylabel('Average Delay (seconds)')
+            axes[1, 1].set_title('Hop Count vs Throughput\n(No successful flows)')
         axes[1, 1].grid(True, alpha=0.3)
         
         # Traffic volume by flow with protocol colors
@@ -411,13 +432,17 @@ class WiFiMeshBackhaulAnalyzer:
         udp_flows = len(flow_df[flow_df['protocol'] == 'UDP'])
         tcp_flows = len(flow_df[flow_df['protocol'] == 'TCP'])
         
+        # Calculate hop count statistics
+        avg_hops = successful_flows['avg_hop_count'].mean() if len(successful_flows) > 0 and 'avg_hop_count' in successful_flows.columns else 0
+        
         summary_text = f"Flow Statistics Summary (UDP & TCP only):\n" \
                       f"• Total Flows: {total_flows}\n" \
                       f"• UDP Flows: {udp_flows}\n" \
                       f"• TCP Flows: {tcp_flows}\n" \
                       f"• Successful: {successful_count}\n" \
                       f"• Failed: {failed_count}\n" \
-                      f"• Success Rate: {(successful_count/total_flows)*100:.1f}%"
+                      f"• Success Rate: {(successful_count/total_flows)*100:.1f}%\n" \
+                      f"• Avg Hop Count: {avg_hops:.2f}"
         
         fig.text(0.02, 0.02, summary_text, fontsize=10, 
                 bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
