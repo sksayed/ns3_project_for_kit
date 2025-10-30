@@ -1,0 +1,26 @@
+{
+  "network_topology": {
+    "num_nodes": 25,
+    "grid_width": 5,
+    "node_spacing_meters": 100
+  },
+  "traffic_configuration": {
+    "source_node": 24,
+    "destination_node": 0,
+    "packet_size_bytes": 10000,
+    "protocol": "UDP"
+  },
+  "ip_configuration": {
+    "source_ip": "10.1.1.25",
+    "destination_ip": "10.1.1.1"
+  },
+  "port_information": {
+    "source_port": 49153,
+    "destination_port": 80
+  },
+  "output_files": {
+    "xml_file": "wifi-test1-adhoc-grid.xml",
+    "tr_file": "wifi-test1-adhoc-grid.tr",
+    "flowmon_file": "wifi-test1-adhoc-grid-flowmon.xml"
+  }
+}
