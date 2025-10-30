@@ -141,26 +141,26 @@ MeshAPConfig GetMeshConfig(uint32_t configId) {
         
         case 0:
         default:
-            // Default: HIGH POWER configuration with TP-Link power levels
-            // 27 dBm TX power + 3 dB antenna gains for better mesh connectivity
+            // Default: MEDIUM POWER configuration for 100m range
+            // 20 dBm TX power + 3 dB antenna gains for realistic mesh connectivity
             return MeshAPConfig(
-                "Default High Power Config",
-                "High-power deployment (FULL 400m 3D coverage)",
-                27.0,                           // txPowerStart (dBm) - BOOSTED from 23
-                27.0,                           // txPowerEnd (dBm) - BOOSTED from 23
+                "Default Medium Power Config",
+                "Medium-power deployment (100m range coverage)",
+                20.0,                           // txPowerStart (dBm) - Set for ~100m range
+                20.0,                           // txPowerEnd (dBm) - Set for ~100m range
                 -96.0,                          // rxSensitivity (dBm)
-                3.0,                            // rxGain (dB) - ADDED antenna gain previously 0.0
-                3.0,                            // txGain (dB) - ADDED antenna gain previously 0.0
+                3.0,                            // rxGain (dB) - Antenna gain
+                3.0,                            // txGain (dB) - Antenna gain
                 "WIFI_STANDARD_80211n",         // WiFi standard
                 "HtMcs7",                       // Data mode (802.11n HT MCS7)
                 1,                              // numInterfaces (keep at 1 to avoid channel conflicts)
                 100.0,                          // meshRange (m)
-                15.0,                           // apHeight (m) - UPDATED for 3D coverage
-                80.0,                           // apSpacing (m) - UPDATED for 400m coverage
-                6                               // gridSize (6x6 = 36 APs) - UPDATED
+                15.0,                           // apHeight (m) - 3D coverage consideration
+                70.0,                           // apSpacing (m) - REDUCED for more hops
+                6                               // gridSize (6x6 = 36 APs) - INCREASED for 70m spacing
             );
-            // Coverage: (6-1) × 80 = 400m × 400m ✅
-            // 3D distance: √(80² + 15²) = 81.4m < 100m ✅
+            // Coverage: (6-1) × 70 = 350m × 350m with multihop routing
+            // 3D distance: √(70² + 15²) = 71.6m (requires routing for most paths)
     }
 }
 
@@ -289,6 +289,70 @@ void IpDropTrace(uint32_t nodeId, const Ipv4Header& header, Ptr<const Packet> pa
             }
         }
     }
+}
+
+// Write configuration to JSON file for parser integration
+void WriteConfigJson(const std::string& jsonPath,
+                     const std::string& scenario,
+                     uint32_t gridSize, double apSpacing, double apHeight,
+                     uint32_t nMeshAPs,
+                     const std::string& wifiStandard, const std::string& dataMode,
+                     double txPower, double rxSensitivity, double rxGain, double txGain,
+                     uint32_t nSTAs, uint32_t packetSizeBytes,
+                     const std::string& trafficType, double simTime,
+                     const std::string& srcIp, const std::string& dstIp,
+                     uint16_t tcpPort, uint16_t udpPort,
+                     bool useTCP, bool useUDP,
+                     const std::string& xmlFile, const std::string& trFile,
+                     const std::string& flowmonFile, const std::string& routesFile)
+{
+    std::ofstream out(jsonPath.c_str());
+    if (!out.is_open()) {
+        std::cerr << "Warning: Could not write config.json to " << jsonPath << std::endl;
+        return;
+    }
+
+    out << "{\n";
+    out << "  \"network_topology\": {\n";
+    out << "    \"grid_width\": " << gridSize << ",\n";
+    out << "    \"num_nodes\": " << nMeshAPs << ",\n";
+    out << "    \"node_spacing_meters\": " << apSpacing << ",\n";
+    out << "    \"ap_height_meters\": " << apHeight << "\n";
+    out << "  },\n";
+    out << "  \"mesh_configuration\": {\n";
+    out << "    \"wifi_standard\": \"" << wifiStandard << "\",\n";
+    out << "    \"data_mode\": \"" << dataMode << "\",\n";
+    out << "    \"tx_power_dbm\": " << txPower << ",\n";
+    out << "    \"rx_sensitivity_dbm\": " << rxSensitivity << ",\n";
+    out << "    \"rx_gain_db\": " << rxGain << ",\n";
+    out << "    \"tx_gain_db\": " << txGain << "\n";
+    out << "  },\n";
+    out << "  \"traffic_configuration\": {\n";
+    out << "    \"scenario\": \"" << scenario << "\",\n";
+    out << "    \"n_stas\": " << nSTAs << ",\n";
+    out << "    \"traffic_type\": \"" << trafficType << "\",\n";
+    out << "    \"use_tcp\": " << (useTCP ? "true" : "false") << ",\n";
+    out << "    \"use_udp\": " << (useUDP ? "true" : "false") << ",\n";
+    out << "    \"packet_size_bytes\": " << packetSizeBytes << ",\n";
+    out << "    \"sim_time_seconds\": " << simTime << "\n";
+    out << "  },\n";
+    out << "  \"ip_configuration\": {\n";
+    out << "    \"source_ip\": \"" << srcIp << "\",\n";
+    out << "    \"destination_ip\": \"" << dstIp << "\"\n";
+    out << "  },\n";
+    out << "  \"port_information\": {\n";
+    out << "    \"tcp_port\": " << tcpPort << ",\n";
+    out << "    \"udp_port\": " << udpPort << "\n";
+    out << "  },\n";
+    out << "  \"output_files\": {\n";
+    out << "    \"xml_file\": \"" << xmlFile << "\",\n";
+    out << "    \"tr_file\": \"" << trFile << "\",\n";
+    out << "    \"flowmonitor_file\": \"" << flowmonFile << "\",\n";
+    out << "    \"routes_file\": \"" << routesFile << "\"\n";
+    out << "  }\n";
+    out << "}\n";
+
+    out.close();
 }
 
 // Setup Sayed to External Server traffic flow
@@ -834,9 +898,9 @@ int main(int argc, char *argv[])
     // Enable packet metadata
     PacketMetadata::Enable();
 
-    // Enable logging
-    LogComponentEnable("BulkSendApplication", LOG_LEVEL_INFO);
-    LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
+    // Enable logging (disabled for cleaner output)
+    // LogComponentEnable("BulkSendApplication", LOG_LEVEL_INFO);
+    // LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
 
     // Command-line configurable parameters
     uint32_t nSTAs = 3;              // Number of STAs (3 = Sayed+Sadia+STA20 for three scenarios)
@@ -1460,6 +1524,37 @@ int main(int argc, char *argv[])
     std::cout << "  2. Sadia → External Server (via Internet)" << std::endl;
     if (nSTAs > 2) {
         std::cout << "  3. Sadia → STA20 (Intra-mesh, via mesh backhaul)" << std::endl;
+    }
+
+    // ========== WRITE CONFIG.JSON FOR PARSER ==========
+    {
+        std::string jsonPath = "wifi-test-reconstruction/config.json";
+        std::string xmlFile = outputDir + "mesh_backhaul_anim.xml";
+        std::string trFile = outputDir + "mesh_backhaul.tr";
+        std::string flowmonFile = outputDir + "flowmonitor.xml";
+        std::string routesFile = outputDir + "mesh_backhaul_routes.xml";
+        
+        // Convert IP addresses to strings
+        std::ostringstream ossSource, ossDest;
+        sadiaIP.Print(ossSource);
+        externalServerIP.Print(ossDest);
+        
+        // Write config for Scenario 2 (Sadia -> External) which is currently active
+        WriteConfigJson(
+            jsonPath,
+            "Sadia->External",
+            gridSize, apSpacing, apHeight,
+            nMeshAPs,
+            meshCfg.wifiStandard, meshCfg.dataMode,
+            meshCfg.txPowerStart, meshCfg.rxSensitivity, meshCfg.rxGain, meshCfg.txGain,
+            nSTAs, packetSize,
+            trafficType, simTime,
+            ossSource.str(), ossDest.str(),
+            tcpPort + 100, udpPort + 100,  // Scenario 2 port offsets
+            useTCP, useUDP,
+            xmlFile, trFile, flowmonFile, routesFile
+        );
+        std::cout << "\n✓ Wrote configuration to " << jsonPath << std::endl;
     }
 
     // ========== ENABLE TRACING ==========

@@ -1,0 +1,39 @@
+{
+  "network_topology": {
+    "grid_width": 6,
+    "num_nodes": 36,
+    "node_spacing_meters": 70,
+    "ap_height_meters": 15
+  },
+  "mesh_configuration": {
+    "wifi_standard": "WIFI_STANDARD_80211n",
+    "data_mode": "HtMcs7",
+    "tx_power_dbm": 20,
+    "rx_sensitivity_dbm": -96,
+    "rx_gain_db": 3,
+    "tx_gain_db": 3
+  },
+  "traffic_configuration": {
+    "scenario": "Sadia->External",
+    "n_stas": 2,
+    "traffic_type": "udp",
+    "use_tcp": false,
+    "use_udp": true,
+    "packet_size_bytes": 30720,
+    "sim_time_seconds": 20
+  },
+  "ip_configuration": {
+    "source_ip": "192.168.2.2",
+    "destination_ip": "200.1.1.2"
+  },
+  "port_information": {
+    "tcp_port": 7100,
+    "udp_port": 8100
+  },
+  "output_files": {
+    "xml_file": "wifi_mesh_backhaul_outputs/mesh_backhaul_anim.xml",
+    "tr_file": "wifi_mesh_backhaul_outputs/mesh_backhaul.tr",
+    "flowmonitor_file": "wifi_mesh_backhaul_outputs/flowmonitor.xml",
+    "routes_file": "wifi_mesh_backhaul_outputs/mesh_backhaul_routes.xml"
+  }
+}
