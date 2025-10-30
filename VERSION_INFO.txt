@@ -1,0 +1,124 @@
+================================================================================
+NS3 5G NR Project - Version Information
+================================================================================
+
+CRITICAL VERSION REQUIREMENTS
+================================================================================
+This project requires EXACT version matching for compatibility.
+DO NOT use other versions - they WILL cause runtime errors!
+
+NS-3 Network Simulator
+--------------------------------------------------------------------------------
+Version:        3.45
+Branch/Tag:     ns-3.45
+Release Date:   May 2025
+Repository:     https://gitlab.com/nsnam/ns-3-dev.git
+Checkout:       git checkout ns-3.45
+
+5G NR Module (CTTC-LENA)
+--------------------------------------------------------------------------------
+Version:        4.1
+Tag:            v4.1
+Release Date:   July 2025
+Repository:     https://gitlab.com/cttc-lena/nr.git
+Location:       contrib/nr/
+Checkout:       git checkout v4.1
+DOI:            10.5281/zenodo.15830121
+
+Custom Code
+--------------------------------------------------------------------------------
+Branch:         5g_implementation
+Simulations:    5g/src/nr_playfield_traces.cc
+                5g/src/nr_simulation.cc
+
+COMPATIBILITY MATRIX
+================================================================================
+✓ WORKING COMBINATION (USE THIS):
+  - NS-3 3.45 + NR Module v4.1
+  - Last tested: October 2025
+  - Status: Fully functional
+
+✗ KNOWN INCOMPATIBILITIES (DO NOT USE):
+  - NS-3 3-dev + NR Module v4.1
+    Error: TypeId initialization failure
+  
+  - NS-3 3.44 + NR Module v4.1
+    Status: Not tested, likely incompatible
+  
+  - NS-3 3.45 + NR Module v4.0
+    Status: May work but not tested
+
+SYSTEM REQUIREMENTS
+================================================================================
+Minimum:
+- OS: Linux (Ubuntu 20.04+), WSL2
+- RAM: 8 GB
+- Disk: 5 GB free
+- CPU: 2 cores
+- Compiler: g++-11 or clang++-17
+
+Recommended:
+- RAM: 16 GB
+- CPU: 4+ cores
+- Compiler: g++-12 or g++-13
+
+BUILD STATISTICS
+================================================================================
+Total Targets:          2336
+Build Time (first):     ~20-30 minutes
+Build Time (rebuild):   ~30-60 seconds
+Parallel Jobs:          -j4 (recommended for 8GB RAM)
+                       -j8 (for 16GB+ RAM)
+
+VERSION VERIFICATION COMMANDS
+================================================================================
+
+Check NS-3 version:
+    cat VERSION
+    git describe --tags
+
+Check NR module version:
+    cd contrib/nr && git describe --tags && cd ../..
+
+Check current branch:
+    git branch -a
+
+List available tags:
+    git tag | grep "ns-3.4"
+
+CHANGELOG
+================================================================================
+
+October 2025:
+- Fixed version compatibility issues
+- Moved NR module to contrib/ directory
+- Updated to ns-3.45 and NR v4.1
+- All 2336 targets building successfully
+- 5G simulations running without errors
+
+REFERENCES
+================================================================================
+
+NS-3 Documentation:
+    https://www.nsnam.org/documentation/
+
+NR Module Documentation:
+    https://5g-lena.cttc.es/
+
+NR Module GitLab:
+    https://gitlab.com/cttc-lena/nr
+
+NR Release Notes:
+    https://gitlab.com/cttc-lena/nr/-/blob/master/RELEASE_NOTES.md
+
+SUPPORT
+================================================================================
+For version-related issues, always verify:
+1. NS-3 is on tag ns-3.45 (not 3-dev)
+2. NR module is on tag v4.1
+3. NR module is in contrib/nr/ directory
+4. All dependencies are installed
+
+Last Updated: October 31, 2025
+Verified By: Build test on Ubuntu 22.04 WSL2
+
