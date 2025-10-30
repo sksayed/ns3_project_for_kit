@@ -47,6 +47,9 @@ build/
 /.cproject
 /.project
 
+# NetAnim cloned dependency
+netanim/
+
 version.cache
 
 .gitlab-ci-local/

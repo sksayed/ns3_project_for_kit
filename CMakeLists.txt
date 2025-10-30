@@ -189,6 +189,9 @@ add_subdirectory(examples)
 # Build scratch/simulation scripts
 add_subdirectory(scratch)
 
+# Build custom wifi test research examples
+add_subdirectory(wifi_test_research)
+
 # Build 5G simulations
 add_subdirectory(5g/src)
 
