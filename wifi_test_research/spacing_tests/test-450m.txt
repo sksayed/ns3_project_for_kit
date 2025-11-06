@@ -1,0 +1,61 @@
+[0/2] Re-checking globbed directories...
+ninja: no work to do.
+=======================================================================
+Starting HWMP Mesh Simulation with Internet Gateway and Hotspot:
+=======================================================================
+  Mesh Nodes: 9 (3x3 grid)
+  Mesh Network: 10.1.1.0/24
+  Gateway: Node 0 -> Internet via 1Gbps Ethernet (192.168.100.1)
+  Internet Server: 8.8.8.2 (simulated external server)
+  Mesh Traffic: Node 7 -> Server 8.8.8.2 (port 80)
+-----------------------------------------------------------------------
+  Hotspot Enabled:
+    AP Node: Node 8 (hybrid mesh + AP)
+    Hotspot Network: 192.168.2.0/24
+    STA Clients: 1
+    STA Traffic: STA -> Server 8.8.8.2 via AP -> Mesh -> Gateway
+-----------------------------------------------------------------------
+  Simulation time: 35s
+=======================================================================
+
+=======================================================================
+FLOWMONITOR STATISTICS
+=======================================================================
+
+-----------------------------------------------------------------------
+Flow 1 (10.1.1.8:49153 -> 8.8.8.2:80)
+-----------------------------------------------------------------------
+  Protocol: 6
+  Tx Packets: 5
+  Tx Bytes:   0.000263214 MB
+  Rx Packets: 0
+  Rx Bytes:   0 MB
+  Lost Packets: 3 (60%)
+  Throughput: 0 Mbps (no packets received)
+  Avg Delay:  N/A
+  Avg Jitter: N/A
+
+-----------------------------------------------------------------------
+Flow 2 (192.168.2.2:49153 -> 8.8.8.2:80)
+-----------------------------------------------------------------------
+  Protocol: 6
+  Tx Packets: 5
+  Tx Bytes:   0.000263214 MB
+  Rx Packets: 0
+  Rx Bytes:   0 MB
+  Lost Packets: 3 (60%)
+  Throughput: 0 Mbps (no packets received)
+  Avg Delay:  N/A
+  Avg Jitter: N/A
+
+=======================================================================
+OVERALL STATISTICS
+=======================================================================
+  Total Flows: 2
+  Total Tx Packets: 10
+  Total Rx Packets: 0
+  Total Lost Packets: 6 (60%)
+  Total Tx Bytes: 0.000526428 MB
+  Total Rx Bytes: 0 MB
+=======================================================================
+

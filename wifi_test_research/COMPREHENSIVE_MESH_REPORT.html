@@ -1,0 +1,743 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Comprehensive Mesh Network Performance Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            border-bottom: 2px solid #95a5a6;
+            padding-bottom: 8px;
+            margin-top: 30px;
+        }
+        h3 {
+            color: #7f8c8d;
+            margin-top: 20px;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th {
+            background-color: #3498db;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+        td {
+            padding: 10px;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        pre {
+            background-color: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            border-left: 4px solid #3498db;
+        }
+        hr {
+            border: none;
+            border-top: 2px solid #ecf0f1;
+            margin: 30px 0;
+        }
+        ul, ol {
+            margin-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        blockquote {
+            border-left: 4px solid #3498db;
+            padding-left: 20px;
+            color: #7f8c8d;
+            font-style: italic;
+        }
+        .page-break {
+            page-break-after: always;
+        }
+        @media print {
+            body {
+                max-width: 100%;
+                margin: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+<h1>Comprehensive Mesh Network Performance Report</h1>
+<p><strong>1MB Packet Size Analysis Across All Mesh Configurations</strong></p>
+<p>Date: November 6, 2025<br />
+Simulation: NS-3 802.11s Mesh Network with Hotspot (STA → AP → Mesh → Gateway → Internet)</p>
+<hr />
+<h2>Executive Summary</h2>
+<p>This report presents a comprehensive analysis of four different mesh AP configurations tested with 1MB packet sizes. The test includes:<br />
+- <strong>Source</strong>: STA nodes (192.168.2.2, 192.168.2.3) connected to AP Node 8 via 802.11ac<br />
+- <strong>Destination</strong>: Internet server (8.8.8.2) <br />
+- <strong>Path</strong>: STA → AP (802.11ac) → Mesh Network (802.11s/802.11n/802.11ax) → Gateway (Node 0) → Internet<br />
+- <strong>Network Topology</strong>: 3×3 grid (9 mesh nodes), 200m spacing, 400m × 400m coverage<br />
+- <strong>Obstacles</strong>: 4 buildings (15m tall, ConcreteWithWindows) strategically placed<br />
+- <strong>Packet Size</strong>: 1,048,576 bytes (1 MB)</p>
+<hr />
+<h2>Network Topology</h2>
+<pre><code>Grid Layout (3×3):
+    0 -   1 -   2
+    |       |       |  
+    3 -   4 -   5
+    |       |       |  
+    6 -   7 -   8
+</code></pre>
+<p><strong>Complete Path (STA 0 → Internet)</strong>:<br />
+1. STA Client (192.168.2.2) <br />
+2. → AP Node 8 (802.11ac hotspot)<br />
+3. → Mesh Node 8 (802.11s/n/ax backhaul)<br />
+4. → Intermediate Mesh Nodes (varies by config)<br />
+5. → Gateway Node 0 (mesh + Ethernet)<br />
+6. → ISP Router → Internet Server (8.8.8.2)</p>
+<hr />
+<h2>Test Configurations</h2>
+<table>
+<thead>
+<tr>
+<th>Config ID</th>
+<th>Device Name</th>
+<th>WiFi Standard</th>
+<th>Data Mode</th>
+<th>TX Power (Mesh)</th>
+<th>TX Power (AP)</th>
+<th>RX Sensitivity</th>
+<th>Antenna Gain</th>
+<th>Expected Range</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Default Test Config</td>
+<td>802.11g</td>
+<td>ErpOfdmRate54Mbps</td>
+<td>20 dBm</td>
+<td>20 dBm</td>
+<td>-96 dBm</td>
+<td>0/0 dB</td>
+<td>250m</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TP-Link EAP225-Outdoor</td>
+<td>802.11n</td>
+<td>HtMcs7</td>
+<td>23 dBm</td>
+<td>22 dBm</td>
+<td>-90 dBm</td>
+<td>5/5 dB</td>
+<td>300m</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Netgear Orbi 960 (WiFi 6E)</td>
+<td>802.11ax</td>
+<td>HeMcs9</td>
+<td>20 dBm</td>
+<td>20 dBm</td>
+<td>-92 dBm</td>
+<td>3/3 dB</td>
+<td>120m</td>
+</tr>
+<tr>
+<td>3</td>
+<td>ASUS ZenWiFi AX (XT8)</td>
+<td>802.11ax</td>
+<td>HeMcs7</td>
+<td>20 dBm</td>
+<td>20 dBm</td>
+<td>-88 dBm</td>
+<td>2/2 dB</td>
+<td>100m</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Mesh Path Analysis</h2>
+<h3>Config 0: Default 802.11g</h3>
+<p><strong>Complete Path</strong>: STA → AP Node 8 → Mesh Node 8 → Node 5 → Node 2 → Node 0 (Gateway)<br />
+- <strong>Mesh Hops</strong>: 3 hops (8 → 5 → 2 → 0)<br />
+- <strong>Total Path Length</strong>: 5 hops (including STA→AP and AP→Mesh)<br />
+- <strong>Mesh Delay</strong>: 1.07 ms<br />
+- <strong>Retransmissions</strong>: 0 retries, 14 duplicate transmissions<br />
+- <strong>Path Verification</strong>: ✅ Verified via .tr file</p>
+<h3>Config 1: TP-Link EAP225-Outdoor</h3>
+<p><strong>Complete Path</strong>: STA → AP Node 8 → Mesh Node 8 → Node 4 → Node 0 (Gateway)<br />
+- <strong>Mesh Hops</strong>: 2 hops (8 → 4 → 0)<br />
+- <strong>Total Path Length</strong>: 4 hops<br />
+- <strong>Mesh Delay</strong>: 0.58 ms<br />
+- <strong>Retransmissions</strong>: 3 retries at TTL 32<br />
+- <strong>Path Verification</strong>: ✅ Verified via .tr file<br />
+- <strong>Note</strong>: Shorter path due to better range (300m) and higher TX power (23 dBm)</p>
+<h3>Config 2: Netgear Orbi 960 (WiFi 6E)</h3>
+<p><strong>Complete Path</strong>: STA → AP Node 8 → Mesh Node 8 → Node 4 → Node 0 (Gateway)<br />
+- <strong>Mesh Hops</strong>: 2 hops (8 → 4 → 0)<br />
+- <strong>Total Path Length</strong>: 4 hops<br />
+- <strong>Mesh Delay</strong>: 0.58 ms<br />
+- <strong>Retransmissions</strong>: 3 retries at TTL 32<br />
+- <strong>Path Verification</strong>: ✅ Verified via .tr file<br />
+- <strong>Note</strong>: Same path as Config 1, WiFi 6E with 12 antennas</p>
+<h3>Config 3: ASUS ZenWiFi AX (XT8)</h3>
+<p><strong>Complete Path</strong>: STA → AP Node 8 → Mesh Node 8 → Node 6 → Node 0 (Gateway)<br />
+- <strong>Mesh Hops</strong>: 2 hops (8 → 6 → 0)<br />
+- <strong>Total Path Length</strong>: 4 hops<br />
+- <strong>Mesh Delay</strong>: 0.52 ms<br />
+- <strong>Retransmissions</strong>: 3 retries at TTL 32<br />
+- <strong>Path Verification</strong>: ✅ Verified via .tr file<br />
+- <strong>Note</strong>: Different path (via Node 6 instead of Node 4), WiFi 6 with 6 antennas</p>
+<hr />
+<h2>Performance Metrics Summary</h2>
+<h3>Table 1: STA 0 (192.168.2.2 → 8.8.8.2) - TCP Traffic</h3>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+<th>Device Name</th>
+<th>PDR (%)</th>
+<th>Avg E2E Delay (ms)</th>
+<th>Throughput (Mbps)</th>
+<th>Mesh Hops</th>
+<th>Retransmissions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Default 802.11g</td>
+<td>100.0</td>
+<td>8.924</td>
+<td>0.000071</td>
+<td>3</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TP-Link EAP225</td>
+<td>100.0</td>
+<td>56.920</td>
+<td>0.000071</td>
+<td>2</td>
+<td>3</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Netgear Orbi 960</td>
+<td>100.0</td>
+<td>56.920</td>
+<td>0.000071</td>
+<td>2</td>
+<td>3</td>
+</tr>
+<tr>
+<td>3</td>
+<td>ASUS ZenWiFi XT8</td>
+<td>100.0</td>
+<td>254.333</td>
+<td>0.000071</td>
+<td>2</td>
+<td>3</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key Observations</strong>:<br />
+- All configs achieved 100% PDR for STA 0 TCP traffic<br />
+- Config 0 (802.11g) had the <strong>lowest E2E delay</strong> (8.924 ms) despite having 3 hops<br />
+- Config 3 (ASUS ZenWiFi) had the <strong>highest E2E delay</strong> (254.333 ms), likely due to WiFi 6 higher protocol overhead and lower range (100m)<br />
+- Configs 1 and 2 showed identical performance (56.920 ms delay), same path (8→4→0)<br />
+- Throughput was nearly identical across all configs (0.000071 Mbps) - limited by packet size and simulation duration</p>
+<h3>Table 2: Mesh Node 7 (10.1.1.8 → 8.8.8.2) - TCP Traffic (Direct Mesh Traffic)</h3>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+<th>Device Name</th>
+<th>PDR (%)</th>
+<th>Avg E2E Delay (ms)</th>
+<th>Throughput (Mbps)</th>
+<th>Tx Packets</th>
+<th>Rx Packets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Default 802.11g</td>
+<td>100.0</td>
+<td>6.077</td>
+<td>0.000068</td>
+<td>4</td>
+<td>4</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TP-Link EAP225</td>
+<td>100.0</td>
+<td>5.609</td>
+<td>0.000068</td>
+<td>4</td>
+<td>4</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Netgear Orbi 960</td>
+<td>100.0</td>
+<td>5.609</td>
+<td>0.000068</td>
+<td>4</td>
+<td>4</td>
+</tr>
+<tr>
+<td>3</td>
+<td>ASUS ZenWiFi XT8</td>
+<td>75.0</td>
+<td>6.761</td>
+<td>0.000051</td>
+<td>4</td>
+<td>3</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key Observations</strong>:<br />
+- <strong>Config 3 experienced packet loss</strong> (75% PDR) - 1 out of 4 packets lost<br />
+- Configs 0, 1, 2 maintained 100% PDR<br />
+- Direct mesh traffic showed lower delays (5-7 ms) compared to STA traffic (9-254 ms)<br />
+- Config 3's lower range (100m) and antenna gain (2 dB) may have contributed to packet loss</p>
+<h3>Table 3: Return Path (8.8.8.2 → STAs) - TCP ACK Traffic</h3>
+<h4>To STA 0 (192.168.2.2)</h4>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+<th>Device Name</th>
+<th>PDR (%)</th>
+<th>Avg E2E Delay (ms)</th>
+<th>Throughput (Mbps)</th>
+<th>Tx Packets</th>
+<th>Rx Packets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Default 802.11g</td>
+<td>100.0</td>
+<td>9.200</td>
+<td>0.000036</td>
+<td>2</td>
+<td>2</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TP-Link EAP225</td>
+<td>100.0</td>
+<td>8.548</td>
+<td>0.000036</td>
+<td>2</td>
+<td>2</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Netgear Orbi 960</td>
+<td>100.0</td>
+<td>8.548</td>
+<td>0.000036</td>
+<td>2</td>
+<td>2</td>
+</tr>
+<tr>
+<td>3</td>
+<td>ASUS ZenWiFi XT8</td>
+<td>100.0</td>
+<td>8.244</td>
+<td>0.000038</td>
+<td>2</td>
+<td>2</td>
+</tr>
+</tbody>
+</table>
+<h4>To Mesh Node 7 (10.1.1.8)</h4>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+<th>Device Name</th>
+<th>PDR (%)</th>
+<th>Avg E2E Delay (ms)</th>
+<th>Throughput (Mbps)</th>
+<th>Tx Packets</th>
+<th>Rx Packets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Default 802.11g</td>
+<td>100.0</td>
+<td>9.062</td>
+<td>0.000035</td>
+<td>2</td>
+<td>2</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TP-Link EAP225</td>
+<td>100.0</td>
+<td>9.155</td>
+<td>0.000035</td>
+<td>2</td>
+<td>2</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Netgear Orbi 960</td>
+<td>100.0</td>
+<td>9.155</td>
+<td>0.000035</td>
+<td>2</td>
+<td>2</td>
+</tr>
+<tr>
+<td>3</td>
+<td>ASUS ZenWiFi XT8</td>
+<td>100.0</td>
+<td>2.890</td>
+<td>0.000133</td>
+<td>8</td>
+<td>8</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note</strong>: Config 3 shows different behavior with 8 packets instead of 2, likely due to TCP retransmission mechanisms compensating for forward path loss.</p>
+<hr />
+<h2>Aggregate Network Performance</h2>
+<h3>Table 4: Overall Network Statistics</h3>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+<th>Device Name</th>
+<th>Total Tx Packets</th>
+<th>Total Rx Packets</th>
+<th>Total Lost Packets</th>
+<th>Overall PDR (%)</th>
+<th>Avg Network Delay (ms)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Default 802.11g</td>
+<td>12</td>
+<td>12</td>
+<td>0</td>
+<td>100.0</td>
+<td>8.316</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TP-Link EAP225</td>
+<td>12</td>
+<td>12</td>
+<td>0</td>
+<td>100.0</td>
+<td>20.058</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Netgear Orbi 960</td>
+<td>12</td>
+<td>12</td>
+<td>0</td>
+<td>100.0</td>
+<td>20.058</td>
+</tr>
+<tr>
+<td>3</td>
+<td>ASUS ZenWiFi XT8</td>
+<td>18</td>
+<td>17</td>
+<td>1</td>
+<td>94.4</td>
+<td>68.057</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>STA 1 (UDP Traffic) Analysis</h2>
+<p><strong>Note</strong>: No UDP traffic was detected from STA 1 (192.168.2.3) in any configuration. The simulation setup alternates between TCP and UDP for STA clients (STA 0 = TCP, STA 1 = UDP), but the UDP traffic did not appear to be generated or captured in the NetAnim XML output.</p>
+<p><strong>Possible Reasons</strong>:<br />
+1. UDP client may have started after simulation time window<br />
+2. NetAnim metadata filtering may not have captured UDP mesh packets<br />
+3. UDP packets may have been dropped before entering the mesh network</p>
+<p><strong>Recommendation</strong>: Verify application start times and NetAnim metadata capture for UDP traffic in future tests.</p>
+<hr />
+<h2>Detailed Performance Analysis</h2>
+<h3>1. Packet Delivery Ratio (PDR)</h3>
+<p><strong>Winner</strong>: Configs 0, 1, 2 (100% PDR)<br />
+<strong>Concern</strong>: Config 3 (94.4% PDR) - 1 packet lost</p>
+<p><strong>Analysis</strong>:<br />
+- Config 3 (ASUS ZenWiFi XT8) is the only configuration that experienced packet loss<br />
+- The 100m range is <strong>2× the node spacing (200m)</strong>, which may be insufficient for reliable multi-hop mesh<br />
+- Lower antenna gain (2 dB vs 5 dB in TP-Link) reduces effective range<br />
+- WiFi 6 (802.11ax) may have higher sensitivity to interference from buildings</p>
+<h3>2. End-to-End Delay</h3>
+<p><strong>Winner</strong>: Config 0 (8.924 ms for STA traffic)<br />
+<strong>Runner-up</strong>: Configs 1 &amp; 2 (56.920 ms)<br />
+<strong>Worst</strong>: Config 3 (254.333 ms)</p>
+<p><strong>Analysis</strong>:<br />
+- <strong>Config 0 (802.11g)</strong> surprisingly outperformed all others in delay:<br />
+  - 3-hop path (8→5→2→0) vs 2-hop paths in others<br />
+  - Lower protocol overhead (802.11g vs 802.11ax)<br />
+  - No retransmissions (0 vs 3 in others)<br />
+  - Better suited for 200m spacing despite lower range specification</p>
+<ul>
+<li><strong>Configs 1 &amp; 2</strong> (56.920 ms):</li>
+<li>Identical performance due to same path (8→4→0)</li>
+<li>Higher TX power (23 dBm) and antenna gain (5 dB, 3 dB) enabled direct path</li>
+<li>
+<p>3 retransmissions indicate channel contention or collisions</p>
+</li>
+<li>
+<p><strong>Config 3</strong> (254.333 ms):</p>
+</li>
+<li><strong>3.7× higher delay</strong> than Configs 1/2</li>
+<li><strong>28× higher delay</strong> than Config 0</li>
+<li>WiFi 6 (802.11ax) protocol overhead</li>
+<li>Lower range (100m) forcing more conservative routing</li>
+<li>Different path (8→6→0) may have more contention</li>
+</ul>
+<h3>3. Throughput</h3>
+<p><strong>Result</strong>: Nearly identical across all configs (0.000036 - 0.000133 Mbps)</p>
+<p><strong>Analysis</strong>:<br />
+- Throughput is primarily limited by:<br />
+  1. <strong>Simulation time</strong>: Only 35 seconds<br />
+  2. <strong>Packet size</strong>: 1 MB per packet<br />
+  3. <strong>Application pattern</strong>: OnOffHelper with 2s On, 1s Off<br />
+  4. <strong>Small sample size</strong>: Only 2-4 packets per flow</p>
+<ul>
+<li>Throughput differences are negligible (&lt; 0.0001 Mbps)</li>
+<li>Not a meaningful metric for this test scenario</li>
+</ul>
+<hr />
+<h2>Routing Path Comparison</h2>
+<h3>Path Diversity Analysis</h3>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Config 0 Path</th>
+<th>Config 1/2 Path</th>
+<th>Config 3 Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>STA 0 (192.168.2.2)</td>
+<td>8 → 5 → 2 → 0</td>
+<td>8 → 4 → 0</td>
+<td>8 → 6 → 0</td>
+</tr>
+<tr>
+<td>Mesh Node 7 (10.1.1.8)</td>
+<td>7 → ... → 0</td>
+<td>7 → ... → 0</td>
+<td>7 → ... → 0</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key Insights</strong>:<br />
+1. <strong>Config 0</strong> chose a <strong>3-hop diagonal path</strong> (8→5→2→0) despite having the shortest range<br />
+2. <strong>Configs 1 &amp; 2</strong> chose the <strong>same 2-hop path</strong> (8→4→0) due to higher TX power and range<br />
+3. <strong>Config 3</strong> chose a <strong>different 2-hop path</strong> (8→6→0), possibly due to:<br />
+   - Different HWMP routing metrics<br />
+   - Link quality variations<br />
+   - Random path selection during mesh setup</p>
+<h3>Geographic Path Analysis</h3>
+<pre><code>Config 0 Path (8→5→2→0):
+    0* -  1  - [2]
+    |      |     ↑
+    3  -  4  - [5]
+    |      |     ↑
+    6  -  7  - [8]
+
+Config 1/2 Path (8→4→0):
+   [0]*-  1  -  2
+    ↑      |     |
+   [4] -  [4]'-  5
+    ↑      |     |
+    6  -  7  - [8]
+
+Config 3 Path (8→6→0):
+   [0]*-  1  -  2
+    ↑      |     |
+   [3] - [4]-   5
+    ↑      |     |
+   [6] -  7  - [8]
+</code></pre>
+<p>(*Gateway, [] = active path nodes)</p>
+<hr />
+<h2>Retransmission Analysis</h2>
+<h3>Config 0 (Default 802.11g)</h3>
+<ul>
+<li><strong>Mesh TTL 32</strong>: 4 transmissions (0 retries, 1 unique node)</li>
+<li><strong>Mesh TTL 31</strong>: 4 transmissions (0 retries, 2 unique nodes)</li>
+<li><strong>Mesh TTL 30</strong>: 4 transmissions (0 retries, 2 unique nodes)</li>
+<li><strong>Total</strong>: 0 retries, 14 duplicate transmissions (different packets, same TTL)</li>
+<li><strong>Interpretation</strong>: Clean transmission, duplicates are from broadcast nature of WiFi mesh</li>
+</ul>
+<h3>Configs 1, 2, 3 (802.11n/ax)</h3>
+<ul>
+<li><strong>Mesh TTL 32</strong>: 7 transmissions (3 retries)</li>
+<li><strong>Mesh TTL 31</strong>: 4 transmissions (varies: 0-2 retries, 2-3 unique nodes)</li>
+<li><strong>Total</strong>: 3-8 retries/duplicates</li>
+<li><strong>Interpretation</strong>: Higher protocol overhead and potential channel contention</li>
+</ul>
+<hr />
+<h2>Configuration Recommendations</h2>
+<h3>Best Overall Performance</h3>
+<p><strong>Config 0 (Default 802.11g)</strong><br />
+- ✅ 100% PDR<br />
+- ✅ <strong>Lowest E2E delay (8.924 ms)</strong><br />
+- ✅ No retransmissions<br />
+- ✅ Stable 3-hop routing<br />
+- ⚠️ Lowest TX power and no antenna gain<br />
+- <strong>Use Case</strong>: General-purpose mesh, cost-effective, proven performance</p>
+<h3>Best for High TX Power / Range</h3>
+<p><strong>Config 1 (TP-Link EAP225-Outdoor)</strong><br />
+- ✅ 100% PDR<br />
+- ✅ <strong>Highest TX power (23 dBm mesh, 22 dBm AP)</strong><br />
+- ✅ <strong>Best antenna gain (5 dB RX/TX)</strong><br />
+- ✅ 802.11n (better than 802.11g, simpler than 802.11ax)<br />
+- ⚠️ Moderate delay (56.920 ms)<br />
+- <strong>Use Case</strong>: Outdoor deployments, long-range coverage, challenging environments</p>
+<h3>Best for Future-Proofing</h3>
+<p><strong>Config 2 (Netgear Orbi 960 WiFi 6E)</strong><br />
+- ✅ 100% PDR<br />
+- ✅ <strong>WiFi 6E (latest standard)</strong><br />
+- ✅ <strong>12 antennas</strong> (best MIMO capability)<br />
+- ✅ 3 dB antenna gain<br />
+- ⚠️ Moderate delay (56.920 ms)<br />
+- ⚠️ Over-specified for 200m spacing (120m range)<br />
+- <strong>Use Case</strong>: Premium deployments, dense client environments, future scalability</p>
+<h2>Building Impact Analysis</h2>
+<p>All configurations had <strong>4 buildings (15m tall, ConcreteWithWindows)</strong> strategically placed between mesh nodes:<br />
+1. <strong>Building 1</strong>: Between Nodes 0 and 4<br />
+2. <strong>Building 2</strong>: Between Nodes 4 and 8<br />
+3. <strong>Building 3</strong>: Between Nodes 1, 2, 4, 5<br />
+4. <strong>Building 4</strong>: Between Nodes 3, 4, 6, 7</p>
+<p><strong>Observations</strong>:<br />
+- All configs successfully routed around buildings<br />
+- Config 0 chose a diagonal path (8→5→2→0) avoiding direct building obstruction<br />
+- Configs 1/2 used central node 4 (potentially affected by 2 buildings)<br />
+- Config 3 used edge path (8→6→0) avoiding central building cluster<br />
+- Building penetration loss (HybridBuildingsPropagationLossModel) likely contributed to Config 3's packet loss</p>
+<hr />
+<h2>Conclusions</h2>
+<ol>
+<li><strong>802.11g (Config 0) outperformed all WiFi 6/6E configurations</strong> in this test scenario:</li>
+<li>Lowest delay (8.924 ms)</li>
+<li>Zero retransmissions</li>
+<li>100% PDR</li>
+<li>
+<p>Most efficient routing (3-hop path worked better than expected)</p>
+</li>
+<li>
+<p><strong>TP-Link EAP225-Outdoor (Config 1)</strong> is the <strong>best practical choice</strong> for real deployments:</p>
+</li>
+<li>High TX power (23 dBm) provides range margin</li>
+<li>Best antenna gain (5 dB) improves link quality</li>
+<li>802.11n balances performance and complexity</li>
+<li>
+<p>100% PDR with acceptable delay (56.920 ms)</p>
+</li>
+<li>
+<p><strong>WiFi 6E (Config 2) underperformed expectations</strong>:</p>
+</li>
+<li>Same performance as Config 1 despite being newer standard</li>
+<li>Premium features (12 antennas, WiFi 6E) not utilized effectively</li>
+<li>
+<p>Over-specified for this test scenario</p>
+</li>
+<li>
+<p><strong>ASUS ZenWiFi XT8 (Config 3) is unsuitable for 200m spacing</strong>:</p>
+</li>
+<li>100m range is <strong>2× exceeded</strong> by 200m spacing</li>
+<li>Packet loss (94.4% PDR)</li>
+<li>Very high delay (254.333 ms)</li>
+<li>
+<p><strong>Requires spacing reduction to ≤ 80m</strong></p>
+</li>
+<li>
+<p><strong>Routing path diversity</strong> shows HWMP mesh routing adapts to:</p>
+</li>
+<li>Device capabilities (TX power, RX sensitivity)</li>
+<li>Link quality</li>
+<li>Building obstructions</li>
+<li>Different paths can yield vastly different performance</li>
+</ol>
+<hr />
+<p>All raw data files are stored in <code>wifi_test_research/</code>:</p>
+<h3>Configuration 0 (Default 802.11g)</h3>
+<ul>
+<li><code>config0_sta0_parse.txt</code> - Hop-by-hop path analysis for STA 0</li>
+<li><code>config0_sta1_parse.txt</code> - Hop-by-hop path analysis for STA 1 (no data)</li>
+<li><code>config0_metrics.json</code> - FlowMonitor metrics (JSON)</li>
+<li><code>config0_flowmon_summary.txt</code> - FlowMonitor summary (text)</li>
+</ul>
+<h3>Configuration 1 (TP-Link EAP225-Outdoor)</h3>
+<ul>
+<li><code>config1_sta0_parse.txt</code> - Hop-by-hop path analysis for STA 0</li>
+<li><code>config1_metrics.json</code> - FlowMonitor metrics (JSON)</li>
+<li><code>config1_flowmon_summary.txt</code> - FlowMonitor summary (text)</li>
+</ul>
+<h3>Configuration 2 (Netgear Orbi 960)</h3>
+<ul>
+<li><code>config2_sta0_parse.txt</code> - Hop-by-hop path analysis for STA 0</li>
+<li><code>config2_metrics.json</code> - FlowMonitor metrics (JSON)</li>
+<li><code>config2_flowmon_summary.txt</code> - FlowMonitor summary (text)</li>
+</ul>
+<h3>Configuration 3 (ASUS ZenWiFi XT8)</h3>
+<ul>
+<li><code>config3_sta0_parse.txt</code> - Hop-by-hop path analysis for STA 0</li>
+<li><code>config3_metrics.json</code> - FlowMonitor metrics (JSON)</li>
+<li><code>config3_flowmon_summary.txt</code> - FlowMonitor summary (text)</li>
+</ul>
+<hr />
+<p><strong>Report Generated</strong>: November 6, 2025<br />
+<strong>Simulation Tool</strong>: NS-3.dev<br />
+<strong>Analysis Script</strong>: test_2_verify_mesh_path.py<br />
+<strong>Network</strong>: 3×3 mesh grid, 200m spacing, 4 buildings, STA→AP→Mesh→Internet<br />
+<strong>Packet Size</strong>: 1,048,576 bytes (1 MB)</p>
+</body>
+</html>

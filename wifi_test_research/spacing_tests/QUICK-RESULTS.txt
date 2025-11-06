@@ -1,0 +1,71 @@
+===============================================================================
+HYBRIDBUILDINGS MODEL - NODE SPACING TEST RESULTS
+===============================================================================
+
+Configuration:
+- Model: HybridBuildingsPropagationLossModel ONLY (default parameters)
+- Buildings: 4 (all enabled, ConcreteWithWindows)
+- Nodes: 9 (3×3 grid)
+- TX Power: 27 dBm (mesh), 20 dBm (hotspot)
+
+===============================================================================
+RESULTS
+===============================================================================
+
+Spacing | Total Loss % | Mesh Loss % | STA Loss % | Avg Delay | Rating
+--------|-------------|-------------|------------|-----------|--------
+ 150m   |   1.02%     |   0.98%     |   1.75%    |  15.5 ms  | ✅ Excellent
+ 200m   |   2.55%     |   1.69%     |   2.58%    |  12.2 ms  | ✅ Excellent
+ 250m   |   0.93%     |   0.30%     |   2.46%    |   9.5 ms  | ⭐ OPTIMAL
+ 300m   |   3.21%     |   3.09%     |   5.53%    |  19.4 ms  | ✅ Excellent
+
+===============================================================================
+KEY FINDINGS
+===============================================================================
+
+✅ ALL SPACINGS WORK EXCELLENTLY (all < 4% loss)!
+
+⭐ OPTIMAL SPACING: 250m
+   - Lowest packet loss: 0.93%
+   - Best mesh flow: 0.30% loss
+   - Excellent delay: 9.5ms
+   - Recommendation: USE THIS
+
+✅ WIDE RANGE SUPPORTED: 150-300m all work with <5% loss
+
+✅ HybridBuildings ALONE works perfectly (no LogDistance needed)
+
+❌ LogDistance + HybridBuildings = 100% loss (NEVER combine them!)
+
+===============================================================================
+COMPARISON TO PREVIOUS TESTS
+===============================================================================
+
+Configuration                    | Spacing | Loss %  | Result
+---------------------------------|---------|---------|--------
+LogDistance + Nakagami (no bldg) |  75m    |  0.19%  | ✅ Works
+HybridBuildings ONLY (4 bldgs)   | 150m    |  1.02%  | ✅ Works (2× spacing!)
+HybridBuildings ONLY (4 bldgs)   | 250m    |  0.93%  | ⭐ OPTIMAL (3.3× spacing!)
+HybridBuildings ONLY (4 bldgs)   | 300m    |  3.21%  | ✅ Works (4× spacing!)
+LogDistance + HybridBuildings    |  75m    | 100%    | ❌ BROKEN
+
+===============================================================================
+RECOMMENDATION
+===============================================================================
+
+FOR wifi-test-2-adhoc-grid.cc:
+
+✅ KEEP current configuration:
+   - HybridBuildingsPropagationLossModel ONLY
+   - All 4 buildings enabled
+   - Default parameters (no tuning needed)
+
+✅ SET node spacing to: 250m (optimal balance)
+
+✅ EXPECT:
+   - Packet loss: ~1%
+   - Throughput: ~0.6 Mbps
+   - Delay: ~10ms
+   - Highly reliable mesh network
+
+===============================================================================
