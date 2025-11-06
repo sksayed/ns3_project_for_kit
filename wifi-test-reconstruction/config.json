@@ -16,10 +16,10 @@
   "traffic_configuration": {
     "scenario": "Sadia->External",
     "n_stas": 2,
-    "traffic_type": "udp",
-    "use_tcp": false,
-    "use_udp": true,
-    "packet_size_bytes": 30720,
+    "traffic_type": "tcp",
+    "use_tcp": true,
+    "use_udp": false,
+    "packet_size_bytes": 10240,
     "sim_time_seconds": 20
   },
   "ip_configuration": {

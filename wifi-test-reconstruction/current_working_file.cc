@@ -164,55 +164,9 @@ MeshAPConfig GetMeshConfig(uint32_t configId) {
     }
 }
 
-// Global trace counters
+// Global trace counters (still tracked by callbacks but not displayed)
 uint32_t g_txPackets = 0;
 uint32_t g_rxPackets = 0;
-
-// Per-hop statistics tracking
-// Flow identifier structure (renamed to avoid ns-3's FlowId conflict)
-struct FlowIdentifier {
-    Ipv4Address source;
-    Ipv4Address destination;
-    
-    bool operator<(const FlowIdentifier& other) const {
-        if (source.Get() < other.source.Get()) return true;
-        if (source.Get() == other.source.Get() && destination.Get() < other.destination.Get()) return true;
-        return false;
-    }
-    
-    std::string ToString() const {
-        std::ostringstream oss;
-        oss << source << " → " << destination;
-        return oss.str();
-    }
-};
-
-// Per-hop metrics with protocol separation
-struct HopMetrics {
-    uint32_t apIndex;
-    std::string apName;
-    
-    // TCP metrics
-    uint32_t tcpPacketsIn = 0;
-    uint32_t tcpPacketsOut = 0;
-    uint32_t tcpDropped = 0;
-    
-    // UDP metrics
-    uint32_t udpPacketsIn = 0;
-    uint32_t udpPacketsOut = 0;
-    uint32_t udpDropped = 0;
-};
-
-// Flow tracking structure
-struct FlowTracking {
-    FlowIdentifier flowId;
-    std::string flowName;
-    std::vector<uint32_t> route;
-    std::map<uint32_t, HopMetrics> hopMetrics;
-};
-
-// Global container for all tracked flows
-std::map<FlowIdentifier, FlowTracking> g_trackedFlows;
 
 // TX Trace callback (for application-level tracking)
 void TxTrace(Ptr<const Packet> p)
@@ -226,69 +180,6 @@ void RxTrace(Ptr<const Packet> p, const Address& addr)
 {
     g_rxPackets++;
     NS_LOG_INFO("Rx packet: " << p->GetSize() << " bytes at " << Simulator::Now().GetSeconds());
-}
-
-// IP Forward trace - tracks packets forwarded by mesh APs (Tx trace)
-void IpForwardTrace(uint32_t nodeId, Ptr<const Packet> packet, Ptr<Ipv4> ipv4, uint32_t interface)
-{
-    // Extract header from packet
-    Ipv4Header header;
-    packet->PeekHeader(header);
-    
-    FlowIdentifier fid;
-    fid.source = header.GetSource();
-    fid.destination = header.GetDestination();
-    
-    // Check if this flow is being tracked
-    if (g_trackedFlows.find(fid) != g_trackedFlows.end()) {
-        // Only track if this AP is in the route
-        if (g_trackedFlows[fid].hopMetrics.find(nodeId) != g_trackedFlows[fid].hopMetrics.end()) {
-            if (header.GetProtocol() == 6) {  // TCP
-                g_trackedFlows[fid].hopMetrics[nodeId].tcpPacketsOut++;
-            } else if (header.GetProtocol() == 17) {  // UDP
-                g_trackedFlows[fid].hopMetrics[nodeId].udpPacketsOut++;
-            }
-        }
-    }
-}
-
-// IP RX trace - tracks packets received by mesh APs (LocalDeliver trace)
-void IpRxTrace(uint32_t nodeId, const Ipv4Header& header, Ptr<const Packet> packet, uint32_t interface)
-{
-    FlowIdentifier fid;
-    fid.source = header.GetSource();
-    fid.destination = header.GetDestination();
-    
-    if (g_trackedFlows.find(fid) != g_trackedFlows.end()) {
-        // Only track if this AP is in the route
-        if (g_trackedFlows[fid].hopMetrics.find(nodeId) != g_trackedFlows[fid].hopMetrics.end()) {
-            if (header.GetProtocol() == 6) {
-                g_trackedFlows[fid].hopMetrics[nodeId].tcpPacketsIn++;
-            } else if (header.GetProtocol() == 17) {
-                g_trackedFlows[fid].hopMetrics[nodeId].udpPacketsIn++;
-            }
-        }
-    }
-}
-
-// IP Drop trace - tracks packets dropped by mesh APs
-void IpDropTrace(uint32_t nodeId, const Ipv4Header& header, Ptr<const Packet> packet, 
-                 Ipv4L3Protocol::DropReason reason, Ptr<Ipv4> ipv4, uint32_t interface)
-{
-    FlowIdentifier fid;
-    fid.source = header.GetSource();
-    fid.destination = header.GetDestination();
-    
-    if (g_trackedFlows.find(fid) != g_trackedFlows.end()) {
-        // Only track if this AP is in the route
-        if (g_trackedFlows[fid].hopMetrics.find(nodeId) != g_trackedFlows[fid].hopMetrics.end()) {
-            if (header.GetProtocol() == 6) {
-                g_trackedFlows[fid].hopMetrics[nodeId].tcpDropped++;
-            } else if (header.GetProtocol() == 17) {
-                g_trackedFlows[fid].hopMetrics[nodeId].udpDropped++;
-            }
-        }
-    }
 }
 
 // Write configuration to JSON file for parser integration
@@ -355,82 +246,6 @@ void WriteConfigJson(const std::string& jsonPath,
     out.close();
 }
 
-// Setup Sayed to External Server traffic flow
-void SetupSayedToServerFlow(
-    NodeContainer& staNodes,
-    NodeContainer& externalServer, 
-    Ipv4Address externalServerIP,
-    ApplicationContainer& sayedServerTCP,
-    ApplicationContainer& sayedServerUDP,
-    bool useTCP, 
-    bool useUDP,
-    bool useBulkSend,
-    uint32_t packetSize,
-    uint16_t tcpPort,
-    uint16_t udpPort,
-    double simTime)
-{
-    std::cout << "\n=== Scenario 1: Sayed → External Server (via Internet) ===" << std::endl;
-    
-    // TCP Sink on External Server (receives from Sayed)
-    if (useTCP) {
-        PacketSinkHelper tcpSink("ns3::TcpSocketFactory",
-                                InetSocketAddress(Ipv4Address::GetAny(), tcpPort));
-        sayedServerTCP = tcpSink.Install(externalServer.Get(0));
-        sayedServerTCP.Start(Seconds(0.5));
-        sayedServerTCP.Stop(Seconds(simTime));
-        sayedServerTCP.Get(0)->TraceConnectWithoutContext("Rx", MakeCallback(&RxTrace));
-        std::cout << "  External Server TCP Sink (for Sayed): Port " << tcpPort << std::endl;
-    }
-    
-    // UDP Sink on External Server (receives from Sayed)
-    if (useUDP) {
-        PacketSinkHelper udpSink("ns3::UdpSocketFactory",
-                                InetSocketAddress(Ipv4Address::GetAny(), udpPort));
-        sayedServerUDP = udpSink.Install(externalServer.Get(0));
-        sayedServerUDP.Start(Seconds(0.5));
-        sayedServerUDP.Stop(Seconds(simTime));
-        sayedServerUDP.Get(0)->TraceConnectWithoutContext("Rx", MakeCallback(&RxTrace));
-        std::cout << "  External Server UDP Sink (for Sayed): Port " << udpPort << std::endl;
-    }
-    
-    // TCP Client on Sayed (sends to External Server)
-    if (useTCP) {
-        if (useBulkSend) {
-            BulkSendHelper bulkSend("ns3::TcpSocketFactory",
-                                   InetSocketAddress(externalServerIP, tcpPort));
-            bulkSend.SetAttribute("MaxBytes", UintegerValue(packetSize * 100));
-            ApplicationContainer tcpApp = bulkSend.Install(staNodes.Get(0));
-            tcpApp.Start(Seconds(5.0));
-            tcpApp.Stop(Seconds(simTime - 1.0));
-            tcpApp.Get(0)->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
-            std::cout << "  Sayed → External Server (TCP/BulkSend): 5.0s to " << (simTime-1.0) << "s, " 
-                      << (packetSize * 100 / 1024 / 1024) << " MB total" << std::endl;
-        } else {
-            OnOffHelper tcpClient("ns3::TcpSocketFactory",
-                                InetSocketAddress(externalServerIP, tcpPort));
-            tcpClient.SetConstantRate(DataRate("1Mbps"), packetSize);
-            tcpClient.SetAttribute("StartTime", TimeValue(Seconds(5.0)));
-            tcpClient.SetAttribute("StopTime", TimeValue(Seconds(simTime - 1.0)));
-            ApplicationContainer tcpApp = tcpClient.Install(staNodes.Get(0));
-            tcpApp.Get(0)->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
-            std::cout << "  Sayed → External Server (TCP/OnOff): 5.0s to " << (simTime-1.0) << "s @ 1Mbps" << std::endl;
-        }
-    }
-    
-    // UDP Client on Sayed (sends to External Server)
-    if (useUDP) {
-        OnOffHelper udpClient("ns3::UdpSocketFactory",
-                            InetSocketAddress(externalServerIP, udpPort));
-        udpClient.SetConstantRate(DataRate("500Kbps"), packetSize);
-        udpClient.SetAttribute("StartTime", TimeValue(Seconds(5.5)));
-        udpClient.SetAttribute("StopTime", TimeValue(Seconds(simTime - 1.0)));
-        ApplicationContainer udpApp = udpClient.Install(staNodes.Get(0));
-        udpApp.Get(0)->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
-        std::cout << "  Sayed → External Server (UDP): 5.5s to " << (simTime-1.0) << "s @ 500Kbps" << std::endl;
-    }
-}
-
 // Setup Sadia to External Server traffic flow
 void SetupSadiaToServerFlow(
     NodeContainer& staNodes,
@@ -446,64 +261,46 @@ void SetupSadiaToServerFlow(
     uint16_t udpPort,
     double simTime)
 {
-    std::cout << "\n=== Scenario 2: Sadia → External Server (via Internet) ===" << std::endl;
-    
-    // TCP Sink on External Server (receives from Sadia)
+    // TCP: Setup both server (receiver) and client (sender)
     if (useTCP) {
+        // TCP Sink on External Server (receives from Sadia)
         PacketSinkHelper tcpExtSink("ns3::TcpSocketFactory",
                                     InetSocketAddress(Ipv4Address::GetAny(), tcpPort + 100));
         sadiaServerTCP = tcpExtSink.Install(externalServer.Get(0));
         sadiaServerTCP.Start(Seconds(0.5));
         sadiaServerTCP.Stop(Seconds(simTime));
         sadiaServerTCP.Get(0)->TraceConnectWithoutContext("Rx", MakeCallback(&RxTrace));
-        std::cout << "  External Server TCP Sink: Port " << (tcpPort + 100) << std::endl;
+        
+        // TCP Client on Sadia (sends to External Server) - SINGLE PACKET
+        BulkSendHelper bulkSend("ns3::TcpSocketFactory",
+                               InetSocketAddress(externalServerIP, tcpPort + 100));
+        bulkSend.SetAttribute("MaxBytes", UintegerValue(packetSize));  // SINGLE PACKET
+        ApplicationContainer tcpExtApp = bulkSend.Install(staNodes.Get(1));  // Sadia
+        tcpExtApp.Start(Seconds(6.0));
+        tcpExtApp.Stop(Seconds(simTime - 1.0));
+        tcpExtApp.Get(0)->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
     }
     
-    // UDP Sink on External Server (receives from Sadia)
+    // UDP: Setup both server (receiver) and client (sender)
     if (useUDP) {
-        PacketSinkHelper udpExtSink("ns3::UdpSocketFactory",
-                                    InetSocketAddress(Ipv4Address::GetAny(), udpPort + 100));
-        sadiaServerUDP = udpExtSink.Install(externalServer.Get(0));
+        // UDP Server on External Server (receives from Sadia)
+        UdpServerHelper udpServer(udpPort + 100);
+        sadiaServerUDP = udpServer.Install(externalServer.Get(0));
         sadiaServerUDP.Start(Seconds(0.5));
         sadiaServerUDP.Stop(Seconds(simTime));
-        sadiaServerUDP.Get(0)->TraceConnectWithoutContext("Rx", MakeCallback(&RxTrace));
-        std::cout << "  External Server UDP Sink: Port " << (udpPort + 100) << std::endl;
-    }
-    
-    // TCP Client on Sadia (sends to External Server)
-    if (useTCP) {
-        if (useBulkSend) {
-            BulkSendHelper bulkSend("ns3::TcpSocketFactory",
-                                   InetSocketAddress(externalServerIP, tcpPort + 100));
-            bulkSend.SetAttribute("MaxBytes", UintegerValue(packetSize * 100));
-            ApplicationContainer tcpExtApp = bulkSend.Install(staNodes.Get(1));  // Sadia
-            tcpExtApp.Start(Seconds(6.0));
-            tcpExtApp.Stop(Seconds(simTime - 1.0));
-            tcpExtApp.Get(0)->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
-            std::cout << "  Sadia → External Server (TCP/BulkSend): 6.0s to " << (simTime-1.0) << "s, " 
-                      << (packetSize * 100 / 1024 / 1024) << " MB total" << std::endl;
-        } else {
-            OnOffHelper tcpExtClient("ns3::TcpSocketFactory",
-                                    InetSocketAddress(externalServerIP, tcpPort + 100));
-            tcpExtClient.SetConstantRate(DataRate("1Mbps"), packetSize);
-            tcpExtClient.SetAttribute("StartTime", TimeValue(Seconds(6.0)));
-            tcpExtClient.SetAttribute("StopTime", TimeValue(Seconds(simTime - 1.0)));
-            ApplicationContainer tcpExtApp = tcpExtClient.Install(staNodes.Get(1));  // Sadia
-            tcpExtApp.Get(0)->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
-            std::cout << "  Sadia → External Server (TCP/OnOff): 6.0s to " << (simTime-1.0) << "s @ 1Mbps" << std::endl;
-        }
-    }
-    
-    // UDP Client on Sadia (sends to External Server)
-    if (useUDP) {
-        OnOffHelper udpExtClient("ns3::UdpSocketFactory",
-                                InetSocketAddress(externalServerIP, udpPort + 100));
-        udpExtClient.SetConstantRate(DataRate("500Kbps"), packetSize);
-        udpExtClient.SetAttribute("StartTime", TimeValue(Seconds(6.5)));
-        udpExtClient.SetAttribute("StopTime", TimeValue(Seconds(simTime - 1.0)));
-        ApplicationContainer udpExtApp = udpExtClient.Install(staNodes.Get(1));  // Sadia
-        udpExtApp.Get(0)->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
-        std::cout << "  Sadia → External Server (UDP): 6.5s to " << (simTime-1.0) << "s @ 500Kbps" << std::endl;
+        
+        // UDP Client on Sadia (sends to External Server) - SINGLE PACKET
+        // UdpClient has max packet size limit (~65KB), cap it
+        uint32_t udpPacketSize = std::min(packetSize, (uint32_t)65000);
+        
+        UdpClientHelper udpClient(externalServerIP, udpPort + 100);
+        udpClient.SetAttribute("MaxPackets", UintegerValue(1));  // Only 1 packet
+        udpClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
+        udpClient.SetAttribute("PacketSize", UintegerValue(udpPacketSize));
+        
+        ApplicationContainer udpExtApp = udpClient.Install(staNodes.Get(1));  // Sadia
+        udpExtApp.Start(Seconds(2.0));
+        udpExtApp.Stop(Seconds(simTime - 1.0));
     }
 }
 
@@ -536,290 +333,6 @@ void AnalyzeFlow(const std::string& scenarioName,
                 std::cout << "  " << proto << ": PDR=0% (No packets received)" << std::endl;
             }
         }
-    }
-}
-
-// Discover mesh route from source AP to destination AP
-std::vector<uint32_t> DiscoverMeshRoute(uint32_t srcAPIdx, uint32_t dstAPIdx, uint32_t gridSize)
-{
-    std::vector<uint32_t> route;
-    
-    // Calculate grid positions
-    uint32_t srcRow = srcAPIdx / gridSize;
-    uint32_t srcCol = srcAPIdx % gridSize;
-    uint32_t dstRow = dstAPIdx / gridSize;
-    uint32_t dstCol = dstAPIdx % gridSize;
-    
-    std::cout << "\n=== ROUTE DISCOVERY ===" << std::endl;
-    std::cout << "Source: AP" << srcAPIdx << " at (" << srcRow << "," << srcCol << ")" << std::endl;
-    std::cout << "Destination: AP" << dstAPIdx << " at (" << dstRow << "," << dstCol << ")" << std::endl;
-    
-    // Use simple grid routing: move horizontally first, then vertically
-    uint32_t currentRow = srcRow;
-    uint32_t currentCol = srcCol;
-    
-    route.push_back(srcRow * gridSize + srcCol);  // Starting AP
-    
-    // Move horizontally towards destination
-    while (currentCol != dstCol) {
-        if (currentCol < dstCol) {
-            currentCol++;
-        } else {
-            currentCol--;
-        }
-        route.push_back(currentRow * gridSize + currentCol);
-    }
-    
-    // Move vertically towards destination
-    while (currentRow != dstRow) {
-        if (currentRow < dstRow) {
-            currentRow++;
-        } else {
-            currentRow--;
-        }
-        route.push_back(currentRow * gridSize + currentCol);
-    }
-    
-    std::cout << "Expected Route (grid-based): ";
-    for (size_t i = 0; i < route.size(); i++) {
-        std::cout << "AP" << route[i];
-        if (i < route.size() - 1) std::cout << " → ";
-    }
-    std::cout << std::endl;
-    std::cout << "Total hops: " << (route.size() - 1) << std::endl;
-    
-    return route;
-}
-
-// Register a flow for tracking (scalable design)
-void RegisterFlow(std::string flowName, 
-                  Ipv4Address sourceIP, 
-                  Ipv4Address destIP,
-                  std::vector<uint32_t> route,
-                  uint32_t numMeshAPs)
-{
-    FlowTracking ft;
-    ft.flowId.source = sourceIP;
-    ft.flowId.destination = destIP;
-    ft.flowName = flowName;
-    ft.route = route;
-    
-    // Initialize hop metrics for ALL mesh APs (to find actual HWMP path)
-    for (uint32_t apIdx = 0; apIdx < numMeshAPs; apIdx++) {
-        HopMetrics hm;
-        hm.apIndex = apIdx;
-        hm.apName = "AP" + std::to_string(apIdx);
-        ft.hopMetrics[apIdx] = hm;
-    }
-    
-    g_trackedFlows[ft.flowId] = ft;
-    
-    std::cout << "  Registered flow: " << flowName << " (" 
-              << sourceIP << " → " << destIP << ")" << std::endl;
-    std::cout << "    Tracing: ALL " << numMeshAPs << " mesh APs (to discover actual HWMP path)" << std::endl;
-}
-
-// Setup IP-level tracing for all mesh APs
-void SetupIPLevelTracing(NodeContainer& meshAPs)
-{
-    std::cout << "\n=== SETTING UP IP-LEVEL FLOW TRACKING ===" << std::endl;
-    
-    for (uint32_t i = 0; i < meshAPs.GetN(); i++) {
-        Ptr<Node> node = meshAPs.Get(i);
-        uint32_t nodeId = node->GetId();
-        
-        // Connect IP-level traces using Config::Connect with node-specific paths and bound callbacks
-        std::ostringstream ossTx, ossRx, ossUnicast, ossDrop;
-        ossTx << "/NodeList/" << nodeId << "/$ns3::Ipv4L3Protocol/Tx";
-        ossRx << "/NodeList/" << nodeId << "/$ns3::Ipv4L3Protocol/LocalDeliver";
-        ossUnicast << "/NodeList/" << nodeId << "/$ns3::Ipv4L3Protocol/UnicastForward";
-        ossDrop << "/NodeList/" << nodeId << "/$ns3::Ipv4L3Protocol/Drop";
-        
-        Config::ConnectWithoutContext(ossTx.str(), MakeBoundCallback(&IpForwardTrace, nodeId));
-        Config::ConnectWithoutContext(ossRx.str(), MakeBoundCallback(&IpRxTrace, nodeId));
-        Config::ConnectWithoutContext(ossUnicast.str(), MakeBoundCallback(&IpRxTrace, nodeId)); // Track forwarded packets as RX
-        // TODO: Drop trace - can add later if needed
-        // Config::ConnectWithoutContext(ossDrop.str(), MakeBoundCallback(&IpDropTrace, nodeId));
-    }
-    
-    std::cout << "  IP-level tracing enabled on all " << meshAPs.GetN() << " mesh APs" << std::endl;
-}
-
-// Analyze and print per-hop statistics for all tracked flows
-void AnalyzeAllFlows(uint32_t nMeshAPs, std::string traceFile)
-{
-    std::cout << "\n╔═══════════════════════════════════════════════════════════╗" << std::endl;
-    std::cout << "║         COMPLETE FLOW ANALYSIS (IP + Mesh Layers)        ║" << std::endl;
-    std::cout << "╚═══════════════════════════════════════════════════════════╝\n" << std::endl;
-    
-    for (auto& flowPair : g_trackedFlows) {
-        FlowTracking& flow = flowPair.second;
-        
-        // Build list of APs with actual traffic (HWMP's actual path)
-        std::vector<uint32_t> activeAPs;
-        for (const auto& hopPair : flow.hopMetrics) {
-            const HopMetrics& hm = hopPair.second;
-            bool hasTraffic = (hm.tcpPacketsIn > 0 || hm.tcpPacketsOut > 0 ||
-                               hm.udpPacketsIn > 0 || hm.udpPacketsOut > 0 ||
-                               hm.tcpDropped > 0 || hm.udpDropped > 0);
-            if (hasTraffic) {
-                activeAPs.push_back(hopPair.first);
-            }
-        }
-        
-        // Sort by AP index for logical flow
-        std::sort(activeAPs.begin(), activeAPs.end());
-        
-        // Print header with actual path
-        std::cout << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" << std::endl;
-        std::cout << "FLOW: " << flow.flowName << std::endl;
-        std::cout << "Source: " << flow.flowId.source << " → Destination: " << flow.flowId.destination << std::endl;
-        std::cout << "Path: ";
-        for (size_t i = 0; i < activeAPs.size(); i++) {
-            std::cout << "AP" << activeAPs[i];
-            if (i < activeAPs.size() - 1) std::cout << " → ";
-        }
-        std::cout << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" << std::endl;
-        
-        uint32_t totalTcpSent = 0, totalTcpRecv = 0, totalTcpDrop = 0;
-        uint32_t totalUdpSent = 0, totalUdpRecv = 0, totalUdpDrop = 0;
-        
-        // Print stats for active APs only
-        for (size_t i = 0; i < activeAPs.size(); i++) {
-            uint32_t apIdx = activeAPs[i];
-            HopMetrics& hm = flow.hopMetrics[apIdx];
-            
-            std::cout << "Hop " << (i+1) << ": AP" << apIdx;
-            if (i == 0) std::cout << " (Source AP)";
-            else if (i == activeAPs.size() - 1) std::cout << " (Destination AP)";
-            std::cout << std::endl;
-            
-            if (i == 0) {
-                // Source AP
-                std::cout << "  TCP OUT: " << hm.tcpPacketsOut << " packets" << std::endl;
-                std::cout << "  UDP OUT: " << hm.udpPacketsOut << " packets" << std::endl;
-                totalTcpSent = hm.tcpPacketsOut;
-                totalUdpSent = hm.udpPacketsOut;
-            } else {
-                // Intermediate or destination AP
-                std::cout << "  TCP: IN=" << hm.tcpPacketsIn << ", OUT=" << hm.tcpPacketsOut 
-                          << ", DROP=" << hm.tcpDropped << std::endl;
-                std::cout << "  UDP: IN=" << hm.udpPacketsIn << ", OUT=" << hm.udpPacketsOut 
-                          << ", DROP=" << hm.udpDropped << std::endl;
-                
-                totalTcpDrop += hm.tcpDropped;
-                totalUdpDrop += hm.udpDropped;
-                
-                if (i == activeAPs.size() - 1) {
-                    totalTcpRecv = hm.tcpPacketsIn;
-                    totalUdpRecv = hm.udpPacketsIn;
-                }
-                
-                // Calculate hop PDR (packets received from previous hop)
-                uint32_t prevApIdx = activeAPs[i-1];
-                HopMetrics& prevHm = flow.hopMetrics[prevApIdx];
-                
-                if (prevHm.tcpPacketsOut > 0) {
-                    double tcpPdr = (hm.tcpPacketsIn * 100.0) / prevHm.tcpPacketsOut;
-                    std::cout << "  TCP Hop PDR: " << std::fixed << std::setprecision(2) << tcpPdr << "%";
-                    if (tcpPdr < 95.0) std::cout << " ⚠️";
-                    std::cout << std::endl;
-                }
-                if (prevHm.udpPacketsOut > 0) {
-                    double udpPdr = (hm.udpPacketsIn * 100.0) / prevHm.udpPacketsOut;
-                    std::cout << "  UDP Hop PDR: " << std::fixed << std::setprecision(2) << udpPdr << "%";
-                    if (udpPdr < 95.0) std::cout << " ⚠️";
-                    std::cout << std::endl;
-                }
-            }
-            std::cout << std::endl;
-        }
-        
-        // Summary for this flow
-        std::cout << "─────────────────────────────────────────────────────────────" << std::endl;
-        std::cout << "FLOW SUMMARY:" << std::endl;
-        
-        if (totalTcpSent > 0) {
-            double tcpE2ePdr = (totalTcpRecv * 100.0) / totalTcpSent;
-            std::cout << "  TCP E2E PDR: " << std::fixed << std::setprecision(2) << tcpE2ePdr << "% (" 
-                      << totalTcpRecv << "/" << totalTcpSent << " packets)";
-            if (tcpE2ePdr >= 95.0) std::cout << " ✅";
-            else if (tcpE2ePdr >= 80.0) std::cout << " ⚠️";
-            else std::cout << " ❌";
-            std::cout << std::endl;
-            std::cout << "  TCP Total Drops: " << totalTcpDrop << " packets" << std::endl;
-        }
-        
-        if (totalUdpSent > 0) {
-            double udpE2ePdr = (totalUdpRecv * 100.0) / totalUdpSent;
-            std::cout << "  UDP E2E PDR: " << std::fixed << std::setprecision(2) << udpE2ePdr << "% (" 
-                      << totalUdpRecv << "/" << totalUdpSent << " packets)";
-            if (udpE2ePdr >= 95.0) std::cout << " ✅";
-            else if (udpE2ePdr >= 80.0) std::cout << " ⚠️";
-            else std::cout << " ❌";
-            std::cout << std::endl;
-            std::cout << "  UDP Total Drops: " << totalUdpDrop << " packets" << std::endl;
-        }
-        
-        if (totalTcpSent + totalUdpSent > 0) {
-            uint32_t totalSent = totalTcpSent + totalUdpSent;
-            uint32_t totalRecv = totalTcpRecv + totalUdpRecv;
-            double overallPdr = (totalRecv * 100.0) / totalSent;
-            std::cout << "  Overall E2E PDR: " << std::fixed << std::setprecision(2) << overallPdr << "%" << std::endl;
-        }
-        
-        std::cout << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" << std::endl;
-    }
-}
-
-// Hop count analysis helper - Actually parses trace file
-void AnalyzeHopCount(std::string traceFile)
-{
-    std::cout << "\n=== HOP COUNT ANALYSIS ===" << std::endl;
-    
-    std::ifstream trace(traceFile);
-    if (!trace.is_open()) {
-        std::cout << "Warning: Could not open trace file " << traceFile << std::endl;
-        return;
-    }
-    
-    std::string line;
-    int minTtl = 32;
-    int maxTtl = 0;
-    int packetCount = 0;
-    std::set<int> ttlValues;
-    
-    while (std::getline(trace, line)) {
-        // Look for mesh TTL in packets between 10.1.0.X addresses
-        if (line.find("10.1.0.") != std::string::npos && 
-            line.find("ttl=") != std::string::npos &&
-            line.find("ns3::dot11s::MeshHeader") != std::string::npos) {
-            
-            size_t ttlPos = line.find("ttl=");
-            if (ttlPos != std::string::npos) {
-                int ttl = std::stoi(line.substr(ttlPos + 4, 2));
-                ttlValues.insert(ttl);
-                if (ttl < minTtl) minTtl = ttl;
-                if (ttl > maxTtl) maxTtl = ttl;
-                packetCount++;
-            }
-        }
-    }
-    trace.close();
-    
-    if (packetCount > 0) {
-        int hopCount = maxTtl - minTtl;
-        std::cout << "Mesh packets analyzed: " << packetCount << std::endl;
-        std::cout << "Initial mesh TTL: " << maxTtl << std::endl;
-        std::cout << "Final mesh TTL: " << minTtl << std::endl;
-        std::cout << "Hop count (mesh backbone): " << hopCount << " hops" << std::endl;
-        std::cout << "TTL values seen: ";
-        for (int ttl : ttlValues) {
-            std::cout << ttl << " ";
-        }
-        std::cout << std::endl;
-    } else {
-        std::cout << "No mesh packets found in trace file" << std::endl;
     }
 }
 
@@ -897,11 +410,6 @@ int main(int argc, char *argv[])
 {
     // Enable packet metadata
     PacketMetadata::Enable();
-
-    // Enable logging (disabled for cleaner output)
-    // LogComponentEnable("BulkSendApplication", LOG_LEVEL_INFO);
-    // LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
-
     // Command-line configurable parameters
     uint32_t nSTAs = 3;              // Number of STAs (3 = Sayed+Sadia+STA20 for three scenarios)
     uint32_t packetSizeKB = 10;      // Packet size in KB (10, 100, 1024, etc.)
@@ -960,15 +468,6 @@ int main(int argc, char *argv[])
     externalServer.Create(1);
     staNodes.Create(nSTAs);  // Create requested number of STAs (minimum 3)
 
-    std::cout << "\n[Nodes Created]" << std::endl;
-    std::cout << "  Mesh APs: " << nMeshAPs << std::endl;
-    std::cout << "  Internet gateway: 1" << std::endl;
-    std::cout << "  External server: 1" << std::endl;
-    std::cout << "  STAs: " << nSTAs << " (Index 0=Sayed, 1=Sadia";
-    if (nSTAs > 2) {
-        std::cout << ", 2-" << (nSTAs-1) << "=Additional STAs";
-    }
-    std::cout << ")" << std::endl;
 
     // Mobility setup for mesh APs (grid layout)
     MobilityHelper mobility;
@@ -1037,31 +536,8 @@ int main(int argc, char *argv[])
     std::cout << "    Near: AP" << lastAPIdx << " (diagonal path, " 
               << ((gridSize - 1) * 2) << " hops worst case)" << std::endl;
     
-    // ========== STA20: Slow 3D Movement near Center AP ==========
-    if (nSTAs > 2) {
-        // Use center AP (middle of grid) - SCALABLE for any grid size
-        uint32_t centerAPIdx = (gridSize / 2) * gridSize + (gridSize / 2);
-        uint32_t centerRow = centerAPIdx / gridSize;
-        uint32_t centerCol = centerAPIdx % gridSize;
-        double centerX = centerCol * apSpacing;
-        double centerY = centerRow * apSpacing;
-        
-        // Random initial height between 0-30m
-        Ptr<UniformRandomVariable> randHeight = CreateObject<UniformRandomVariable>();
-        randHeight->SetAttribute("Min", DoubleValue(0.0));
-        randHeight->SetAttribute("Max", DoubleValue(30.0));
-        double sta20Height = randHeight->GetValue();
-        
-        SetupSTAMobility(
-            staNodes.Get(2),              // Node
-            "STA20 (STA 2)",              // Name
-            centerX + 10.0, centerY - 10.0, sta20Height,  // Start position
-            centerX + 5.0, centerX + 15.0,  // X bounds
-            centerY - 15.0, centerY - 5.0,  // Y bounds
-            0.0, 30.0                       // Z bounds
-        );
-        std::cout << "    Near: Center AP" << centerAPIdx << std::endl;
-    }
+   
+ 
     
     std::cout << "\n[Mobility Summary]" << std::endl;
     std::cout << "  Sayed & Sadia: SLOW GaussMarkov 3D mobility (0.3-0.8 m/s)" << std::endl;
@@ -1086,7 +562,6 @@ int main(int argc, char *argv[])
     meshPhy.Set("RxSensitivity", DoubleValue(meshCfg.rxSensitivity));
     meshPhy.Set("RxGain", DoubleValue(meshCfg.rxGain));
     meshPhy.Set("TxGain", DoubleValue(meshCfg.txGain));
-    
     
     
     
@@ -1143,9 +618,7 @@ int main(int argc, char *argv[])
         
         WifiHelper infraWifi;
         WifiMacHelper infraMac;
-        
-        // Use default WiFi standard (802.11a) and adaptive rate control for infrastructure
-        // infraWifi uses defaults which should work without channel conflicts
+      
         
         std::stringstream ssidName;
         ssidName << "mesh-ap" << apIdx << "-net";
@@ -1305,30 +778,7 @@ int main(int argc, char *argv[])
         Ptr<Ipv4StaticRouting> staRouting = staticRoutingHelper.GetStaticRouting(staNodes.Get(staIdx)->GetObject<Ipv4>());
         staRouting->SetDefaultRoute(infraAPInterfaces[staIdx].GetAddress(0), 1);
     }
-    std::cout << "All " << nSTAs << " STAs: Default route via their respective APs" << std::endl;
-    
-    std::cout << "\nRouting Summary:" << std::endl;
-    std::cout << "  - Mesh APs: HWMP for inter-mesh + static for external" << std::endl;
-    std::cout << "  - STAs: Static default routes" << std::endl;
-    std::cout << "  - Gateway: Static routes to all networks" << std::endl;
-
-    // ========== REGISTER FLOWS FOR TRACKING (Will be done after getting IP addresses) ==========
-    std::vector<uint32_t> meshRoute_SayedToExternal;
-    meshRoute_SayedToExternal.push_back(0);  // Only AP0 is in the mesh path for Sayed -> External
-    
-    // Discover routes for intra-mesh flows
-    // if (nSTAs > 2 && apIndices.size() > 2) {
-    //     uint32_t sadiaAPIdx = apIndices[1];  // Sadia's AP (typically AP24)
-    //     uint32_t sta20APIdx = apIndices[2];  // STA20's AP (AP20)
-    //     
-    //     if (sta20APIdx < nMeshAPs && sadiaAPIdx < nMeshAPs) {
-    //         // Discover route for Sadia → STA20
-    //         meshRoute_SadiaToSTA20 = DiscoverMeshRoute(sadiaAPIdx, sta20APIdx, gridSize);
-    //     }
-    // }
-    
-    // Setup IP-level tracing on all mesh APs (one-time setup for all flows)
-    // SetupIPLevelTracing(meshAPNodes);
+  
 
     // ========== BUILDINGS/OBSTACLES (Optional) ==========
     if (useObstacles) {
@@ -1407,24 +857,7 @@ int main(int argc, char *argv[])
     std::cout << "Sadia IP: " << sadiaIP << std::endl;
     std::cout << "External Server IP: " << externalServerIP << std::endl;
 
-    // ========== REGISTER FLOWS FOR PER-HOP TRACKING ==========
-    // std::cout << "\n=== Registering Flows for Per-Hop Analysis ===" << std::endl;
-    
-    // // Register Sayed → External Server flow
-    // RegisterFlow("Sayed → External Server", sayedIP, externalServerIP, meshRoute_SayedToExternal, nMeshAPs);
-    
-    // // Register Sadia → External Server flow (goes through mesh to AP0)
-    // if (nSTAs > 1) {
-    //     uint32_t sadiaAPIdx = apIndices[1];  // Dynamically get Sadia's AP (lastAPIdx)
-    //     std::vector<uint32_t> meshRoute_SadiaToExternal = DiscoverMeshRoute(sadiaAPIdx, 0, gridSize);
-    //     RegisterFlow("Sadia → External Server", sadiaIP, externalServerIP, meshRoute_SadiaToExternal, nMeshAPs);
-    // }
-    
-    // // Register Sadia → STA20 flow (if route was discovered)
-    // if (!meshRoute_SadiaToSTA20.empty() && nSTAs > 2) {
-    //     Ipv4Address sta20IP = staInterfaces[2].GetAddress(0);  // 192.168.3.2
-    //     RegisterFlow("Sadia → STA20", sadiaIP, sta20IP, meshRoute_SadiaToSTA20, nMeshAPs);
-    // }
+  
 
     bool useTCP = (trafficType == "tcp" || trafficType == "both");
     bool useUDP = (trafficType == "udp" || trafficType == "both");
@@ -1451,81 +884,8 @@ int main(int argc, char *argv[])
                            useTCP, useUDP, useBulkSend, packetSize,
                            tcpPort, udpPort, simTime);
     
-    // ========== SCENARIO 3: SADIA → STA20 (Intra-mesh) ==========
-    ApplicationContainer sta20ServerTCP, sta20ServerUDP;
-    
-    if (nSTAs > 2) {
-        std::cout << "\n=== Scenario 3: Sadia → STA20 (Intra-mesh communication) ===" << std::endl;
-        
-        Ipv4Address sta20IP = staInterfaces[2].GetAddress(0);
-        std::cout << "STA20 IP: " << sta20IP << std::endl;
-        
-        // TCP Sink on STA20 (receives from Sadia)
-    if (useTCP) {
-            PacketSinkHelper tcpSta20Sink("ns3::TcpSocketFactory",
-                                        InetSocketAddress(Ipv4Address::GetAny(), tcpPort + 200));
-            sta20ServerTCP = tcpSta20Sink.Install(staNodes.Get(2));  // STA20
-            sta20ServerTCP.Start(Seconds(0.5));
-            sta20ServerTCP.Stop(Seconds(simTime));
-            sta20ServerTCP.Get(0)->TraceConnectWithoutContext("Rx", MakeCallback(&RxTrace));
-            std::cout << "  STA20 TCP Sink: Port " << (tcpPort + 200) << std::endl;
-        }
-        
-        // UDP Sink on STA20 (receives from Sadia)
-    if (useUDP) {
-            PacketSinkHelper udpSta20Sink("ns3::UdpSocketFactory",
-                                        InetSocketAddress(Ipv4Address::GetAny(), udpPort + 200));
-            sta20ServerUDP = udpSta20Sink.Install(staNodes.Get(2));  // STA20
-            sta20ServerUDP.Start(Seconds(0.5));
-            sta20ServerUDP.Stop(Seconds(simTime));
-            sta20ServerUDP.Get(0)->TraceConnectWithoutContext("Rx", MakeCallback(&RxTrace));
-            std::cout << "  STA20 UDP Sink: Port " << (udpPort + 200) << std::endl;
-        }
-        
-        // TCP Client on Sadia (sends to STA20)
-    if (useTCP) {
-        if (useBulkSend) {
-            BulkSendHelper bulkSend("ns3::TcpSocketFactory",
-                                        InetSocketAddress(sta20IP, tcpPort + 200));
-                bulkSend.SetAttribute("MaxBytes", UintegerValue(packetSize * 100));
-                ApplicationContainer tcpSta20App = bulkSend.Install(staNodes.Get(1));  // Sadia
-                tcpSta20App.Start(Seconds(7.0));
-                tcpSta20App.Stop(Seconds(simTime - 1.0));
-                tcpSta20App.Get(0)->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
-                std::cout << "  Sadia → STA20 (TCP/BulkSend): 7.0s to " << (simTime-1.0) << "s, " 
-                      << (packetSize * 100 / 1024 / 1024) << " MB total" << std::endl;
-        } else {
-                OnOffHelper tcpSta20Client("ns3::TcpSocketFactory",
-                                          InetSocketAddress(sta20IP, tcpPort + 200));
-                tcpSta20Client.SetConstantRate(DataRate("1Mbps"), packetSize);
-                tcpSta20Client.SetAttribute("StartTime", TimeValue(Seconds(7.0)));
-                tcpSta20Client.SetAttribute("StopTime", TimeValue(Seconds(simTime - 1.0)));
-                ApplicationContainer tcpSta20App = tcpSta20Client.Install(staNodes.Get(1));  // Sadia
-                tcpSta20App.Get(0)->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
-                std::cout << "  Sadia → STA20 (TCP/OnOff): 7.0s to " << (simTime-1.0) << "s @ 1Mbps" << std::endl;
-            }
-        }
-        
-        // UDP Client on Sadia (sends to STA20)
-    if (useUDP) {
-            OnOffHelper udpSta20Client("ns3::UdpSocketFactory",
-                                      InetSocketAddress(sta20IP, udpPort + 200));
-            udpSta20Client.SetConstantRate(DataRate("500Kbps"), packetSize);
-            udpSta20Client.SetAttribute("StartTime", TimeValue(Seconds(7.5)));
-            udpSta20Client.SetAttribute("StopTime", TimeValue(Seconds(simTime - 1.0)));
-            ApplicationContainer udpSta20App = udpSta20Client.Install(staNodes.Get(1));  // Sadia
-            udpSta20App.Get(0)->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
-            std::cout << "  Sadia → STA20 (UDP): 7.5s to " << (simTime-1.0) << "s @ 500Kbps" << std::endl;
-        }
-    }
-    
-    std::cout << "\n" << (nSTAs > 2 ? "Three" : "Two") << " scenarios configured:" << std::endl;
-    std::cout << "  1. Sayed → External Server (via Internet)" << std::endl;
-    std::cout << "  2. Sadia → External Server (via Internet)" << std::endl;
-    if (nSTAs > 2) {
-        std::cout << "  3. Sadia → STA20 (Intra-mesh, via mesh backhaul)" << std::endl;
-    }
-
+ 
+   
     // ========== WRITE CONFIG.JSON FOR PARSER ==========
     {
         std::string jsonPath = "wifi-test-reconstruction/config.json";
@@ -1562,13 +922,7 @@ int main(int argc, char *argv[])
     
     AsciiTraceHelper ascii;
     meshPhy.EnableAsciiAll(ascii.CreateFileStream(outputDir + "mesh_backhaul.tr"));
-    
-    // PCAP generation disabled for performance
-    // meshPhy.EnablePcapAll(outputDir + "mesh", true);
-    // csma.EnablePcapAll(outputDir + "csma", true);
-    // p2p.EnablePcapAll(outputDir + "external", true);
-    
-    std::cout << "Enabled ASCII tracing (PCAP disabled)" << std::endl;
+
 
     // ========== FLOW MONITOR ==========
     FlowMonitorHelper flowmon;
@@ -1596,83 +950,24 @@ int main(int argc, char *argv[])
     // ========== PRINT STATISTICS ==========
     std::cout << "\n\n========== RESULTS ==========" << std::endl;
     
-    // Get application-level data
-    uint64_t s1_tcp = 0, s1_udp = 0, s2_tcp = 0, s2_udp = 0, s3_tcp = 0, s3_udp = 0;
-    
-    // Scenario 1 is commented out
-    // if (useTCP && sayedServerTCP.GetN() > 0) {
-    //     s1_tcp = DynamicCast<PacketSink>(sayedServerTCP.Get(0))->GetTotalRx();
-    // }
-    // if (useUDP && sayedServerUDP.GetN() > 0) {
-    //     s1_udp = DynamicCast<PacketSink>(sayedServerUDP.Get(0))->GetTotalRx();
-    // }
-    if (useTCP && externalServerTCP.GetN() > 0) {
-        s2_tcp = DynamicCast<PacketSink>(externalServerTCP.Get(0))->GetTotalRx();
-    }
-    if (useUDP && externalServerUDP.GetN() > 0) {
-        s2_udp = DynamicCast<PacketSink>(externalServerUDP.Get(0))->GetTotalRx();
-    }
-    if (nSTAs > 2) {
-        if (useTCP && sta20ServerTCP.GetN() > 0) {
-            s3_tcp = DynamicCast<PacketSink>(sta20ServerTCP.Get(0))->GetTotalRx();
-        }
-        if (useUDP && sta20ServerUDP.GetN() > 0) {
-            s3_udp = DynamicCast<PacketSink>(sta20ServerUDP.Get(0))->GetTotalRx();
-        }
-    }
-    
-   
-    
-    if (nSTAs > 2) {
-        std::cout << "\n[Scenario 3: Sadia → STA20 (Intra-mesh)]" << std::endl;
-        std::cout << "  TCP: " << (s3_tcp/1024.0) << " KB" << std::endl;
-        std::cout << "  UDP: " << (s3_udp/1024.0) << " KB" << std::endl;
-    }
-    
-    std::cout << "\n[Total]" << std::endl;
-    std::cout << "  All Data: " << ((s1_tcp + s1_udp + s2_tcp + s2_udp + s3_tcp + s3_udp)/1024.0) << " KB" << std::endl;
-    
-    std::cout << "\n=== PACKET TRACE STATISTICS ===" << std::endl;
-    std::cout << "Total TX packets (traced): " << g_txPackets << std::endl;
-    std::cout << "Total RX packets (traced): " << g_rxPackets << std::endl;
-    if (g_txPackets > 0) {
-        std::cout << "Delivery ratio: " << (g_rxPackets * 100.0 / g_txPackets) << "%" << std::endl;
-    }
 
     // ========== FLOW MONITOR RESULTS ==========
     monitor->CheckForLostPackets();
     std::map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats();
 
-    std::cout << "\n========== DETAILED METRICS ==========" << std::endl;
+    std::cout << "\n========== FLOWMONITOR STATISTICS ==========" << std::endl;
 
     Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowmon.GetClassifier());
     
-    // Analyze each scenario using encapsulated function
-    // AnalyzeFlow("Scenario 1: Sayed → External Server",
-    //             Ipv4Address("192.168.1.2"), Ipv4Address("200.1.1.2"),
-    //             stats, classifier, tcpPort, udpPort, simTime);
-    
-    // AnalyzeFlow("Scenario 2: Sadia → External Server",
-    //             Ipv4Address("192.168.2.2"), Ipv4Address("200.1.1.2"),
-    //             stats, classifier, tcpPort + 100, udpPort + 100, simTime);
-    
-    // if (nSTAs > 2) {
-    //     AnalyzeFlow("Scenario 3: Sadia → STA20 (Intra-mesh)",
-    //                 Ipv4Address("192.168.2.2"), Ipv4Address("192.168.3.2"),
-    //                 stats, classifier, tcpPort + 200, udpPort + 200, simTime);
-    // }
+
+    AnalyzeFlow("Scenario 2: Sadia → External Server",
+                Ipv4Address("192.168.2.2"), Ipv4Address("200.1.1.2"),
+                stats, classifier, tcpPort + 100, udpPort + 100, simTime);
+ 
 
     // Save FlowMonitor results
     monitor->SerializeToXmlFile(outputDir + "flowmonitor.xml", true, true);
 
-    // Analyze hop count from mesh trace
-    // AnalyzeHopCount(outputDir + "mesh_backhaul.tr");
-    
-    // // Analyze per-hop statistics for all tracked flows
-    // if (!g_trackedFlows.empty()) {
-    //     std::string meshTraceFile = outputDir + "/mesh_backhaul.tr";
-    //     AnalyzeAllFlows(nMeshAPs, meshTraceFile);
-    // }
 
     std::cout << "\n=== SIMULATION COMPLETED ===" << std::endl;
     std::cout << "\nResults saved to " << outputDir << ":" << std::endl;
@@ -1682,25 +977,7 @@ int main(int argc, char *argv[])
     std::cout << "  - NetAnim visualization: mesh_backhaul_anim.xml" << std::endl;
     std::cout << "  - IP route tracking: mesh_backhaul_routes.xml" << std::endl;
     
-    std::cout << "\n=== TOPOLOGY SUMMARY ===" << std::endl;
-    std::cout << "Device: " << meshCfg.name << std::endl;
-    std::cout << "External Server (200.1.1.2)" << std::endl;
-    std::cout << "        │" << std::endl;
-    std::cout << "      P2P (1Gbps, 10ms)" << std::endl;
-    std::cout << "        │" << std::endl;
-    std::cout << "Internet Gateway (172.16.1.1 / 200.1.1.1)" << std::endl;
-    std::cout << "        │" << std::endl;
-    std::cout << "      CSMA (100Mbps, 2ms)" << std::endl;
-    std::cout << "        │" << std::endl;
-    std::cout << "AP0 ←mesh(" << apSpacing << "m)→ AP1...AP" << (lastAPIdx-1) << " ←mesh→ AP" << lastAPIdx << std::endl;
-    std::cout << " ↓WiFi                                           ↓WiFi" << std::endl;
-    std::cout << "Sayed(STA)                                    Sadia(STA)" << std::endl;
-    std::cout << "\nGrid: " << gridSize << "x" << gridSize << " (" << nMeshAPs << " mesh APs)" << std::endl;
-    std::cout << "Coverage: " << (gridSize - 1) * apSpacing << "m x " << (gridSize - 1) * apSpacing << "m" << std::endl;
-    std::cout << "\n3D Layout:" << std::endl;
-    std::cout << "  Height 25m: ─────────────────────────── Sadia (STA)" << std::endl;
-    std::cout << "  Height " << apHeight << "m: AP0───AP1───...───AP" << lastAPIdx << " (Mesh APs)" << std::endl;
-    std::cout << "  Height 15m: ─ Sayed (STA)" << std::endl;
+  
 
     Simulator::Destroy();
     return 0;

@@ -1,0 +1,6 @@
+{
+  "hop_sequence": "8 \u2192 6 \u2192 0",
+  "hop_count": 2,
+  "tcp_path": null,
+  "udp_path": null
+}
