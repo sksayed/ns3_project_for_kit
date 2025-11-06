@@ -1,0 +1,88 @@
+[0/2] Re-checking globbed directories...
+ninja: no work to do.
+=======================================================================
+Starting HWMP Mesh Simulation with Internet Gateway and Hotspot:
+=======================================================================
+  Mesh Nodes: 9 (3x3 grid)
+  Mesh Network: 10.1.1.0/24
+  Gateway: Node 0 -> Internet via 1Gbps Ethernet (192.168.100.1)
+  Internet Server: 8.8.8.2 (simulated external server)
+  Mesh Traffic: Node 7 -> Server 8.8.8.2 (port 80)
+-----------------------------------------------------------------------
+  Hotspot Enabled:
+    AP Node: Node 8 (hybrid mesh + AP)
+    Hotspot Network: 192.168.2.0/24
+    STA Clients: 1
+    STA Traffic: STA -> Server 8.8.8.2 via AP -> Mesh -> Gateway
+-----------------------------------------------------------------------
+  Simulation time: 35s
+=======================================================================
+
+=======================================================================
+FLOWMONITOR STATISTICS
+=======================================================================
+
+-----------------------------------------------------------------------
+Flow 1 (10.1.1.8:49153 -> 8.8.8.2:80)
+-----------------------------------------------------------------------
+  Protocol: 6
+  Tx Packets: 3883
+  Tx Bytes:   2.12248 MB
+  Rx Packets: 3836
+  Rx Bytes:   2.09695 MB
+  Lost Packets: 38 (0.978625%)
+  Throughput: 0.669473 Mbps
+  Avg Delay:  16.8628 ms
+  Avg Jitter: 3.37786 ms
+
+-----------------------------------------------------------------------
+Flow 2 (8.8.8.2:80 -> 10.1.1.8:49153)
+-----------------------------------------------------------------------
+  Protocol: 6
+  Tx Packets: 2118
+  Tx Bytes:   0.108479 MB
+  Rx Packets: 2093
+  Rx Bytes:   0.107147 MB
+  Lost Packets: 16 (0.75543%)
+  Throughput: 0.0342411 Mbps
+  Avg Delay:  9.67071 ms
+  Avg Jitter: 2.95478 ms
+
+-----------------------------------------------------------------------
+Flow 3 (192.168.2.2:49153 -> 8.8.8.2:80)
+-----------------------------------------------------------------------
+  Protocol: 6
+  Tx Packets: 1770
+  Tx Bytes:   0.969883 MB
+  Rx Packets: 1714
+  Rx Bytes:   0.93903 MB
+  Lost Packets: 31 (1.75141%)
+  Throughput: 0.308545 Mbps
+  Avg Delay:  21.1707 ms
+  Avg Jitter: 6.94759 ms
+
+-----------------------------------------------------------------------
+Flow 4 (8.8.8.2:80 -> 192.168.2.2:49153)
+-----------------------------------------------------------------------
+  Protocol: 6
+  Tx Packets: 996
+  Tx Bytes:   0.051815 MB
+  Rx Packets: 982
+  Rx Bytes:   0.0510292 MB
+  Lost Packets: 4 (0.401606%)
+  Throughput: 0.0174958 Mbps
+  Avg Delay:  14.4883 ms
+  Avg Jitter: 5.69525 ms
+
+=======================================================================
+OVERALL STATISTICS
+=======================================================================
+  Total Flows: 4
+  Total Tx Packets: 8767
+  Total Rx Packets: 8625
+  Total Lost Packets: 89 (1.01517%)
+  Total Tx Bytes: 3.25266 MB
+  Total Rx Bytes: 3.19416 MB
+  Average Delay: 15.5481 ms
+=======================================================================
+

@@ -1,0 +1,49 @@
+Config,Device,Metric,Mesh_Node7_Fwd,Mesh_Node7_Rev,STA0_Fwd,STA0_Rev,STA1_Fwd,STA1_Rev,Overall
+0,Default 802.11g,Tx Packets,1932,958,2541,1485,1323,662,8901
+0,Default 802.11g,Rx Packets,1800,869,2448,1399,1226,619,8361
+0,Default 802.11g,Lost Packets,78,61,62,62,68,25,356
+0,Default 802.11g,PDR (%),93.2,90.6,96.3,94.2,92.7,93.5,96.00
+0,Default 802.11g,Delay (ms),15.65,22.42,29.76,15.81,40.47,14.77,23.15
+0,Default 802.11g,Jitter (ms),3.50,9.39,4.00,3.55,5.57,7.12,-
+0,Default 802.11g,Throughput (Mbps),0.294,0.013,0.391,0.023,0.194,0.010,0.84
+
+1,TP-Link EAP225,Tx Packets,3229,1636,2550,1278,1048,509,10250
+1,TP-Link EAP225,Rx Packets,3080,1561,2456,1200,976,454,9727
+1,TP-Link EAP225,Lost Packets,97,56,48,49,61,40,351
+1,TP-Link EAP225,PDR (%),95.4,95.4,96.2,93.9,93.1,89.2,96.58
+1,TP-Link EAP225,Delay (ms),14.51,14.09,20.07,15.49,50.62,22.43,22.87
+1,TP-Link EAP225,Jitter (ms),2.25,3.29,3.02,3.75,3.67,8.02,-
+1,TP-Link EAP225,Throughput (Mbps),0.519,0.024,0.419,0.019,0.162,0.007,1.21
+
+2,Netgear Orbi 960,Tx Packets,2299,1211,2423,1256,1727,1066,9982
+2,Netgear Orbi 960,Rx Packets,2229,1161,2336,1136,1668,982,9515
+2,Netgear Orbi 960,Lost Packets,53,29,84,93,58,53,380
+2,Netgear Orbi 960,PDR (%),97.0,95.9,96.4,90.4,96.6,92.1,96.19
+2,Netgear Orbi 960,Delay (ms),10.48,18.48,22.31,22.62,19.52,14.37,17.96
+2,Netgear Orbi 960,Jitter (ms),2.38,5.62,3.46,7.56,2.97,3.91,-
+2,Netgear Orbi 960,Throughput (Mbps),0.383,0.020,0.394,0.018,0.299,0.017,1.15
+
+3,ASUS ZenWiFi XT8,Tx Packets,2321,1191,2437,1225,2771,1431,11376
+3,ASUS ZenWiFi XT8,Rx Packets,2253,1103,2334,1147,2673,1349,10861
+3,ASUS ZenWiFi XT8,Lost Packets,68,77,54,49,95,68,401
+3,ASUS ZenWiFi XT8,PDR (%),97.1,92.6,95.8,93.6,96.5,94.3,96.47
+3,ASUS ZenWiFi XT8,Delay (ms),13.18,13.44,28.06,12.66,30.68,13.91,18.65
+3,ASUS ZenWiFi XT8,Jitter (ms),2.38,3.40,3.79,6.07,4.40,6.02,-
+3,ASUS ZenWiFi XT8,Throughput (Mbps),0.399,0.018,0.396,0.018,0.466,0.022,1.36
+
+Summary - Best Values by Metric
+Config,Device,Best_Overall_PDR,Best_Overall_Delay,Best_Flow_PDR,Best_Flow_Delay,Best_Jitter,Best_Throughput
+1,TP-Link EAP225,96.58%,22.87 ms,96.2%,14.09 ms,2.25 ms,0.519 Mbps
+2,Netgear Orbi 960,96.19%,17.96 ms,97.0%,10.48 ms,2.38 ms,0.394 Mbps
+3,ASUS ZenWiFi XT8,96.47%,18.65 ms,97.1%,12.66 ms,2.38 ms,0.466 Mbps
+0,Default 802.11g,96.00%,23.15 ms,96.3%,14.77 ms,3.50 ms,0.391 Mbps
+
+Flow Definitions
+Flow,Source,Destination,Direction
+1,10.1.1.8:49153,8.8.8.2:80,Mesh Node 7 → Internet (Forward)
+2,8.8.8.2:80,10.1.1.8:49153,Internet → Mesh Node 7 (Return)
+3,192.168.2.2:49153,8.8.8.2:80,STA 0 → Internet (Forward)
+4,8.8.8.2:80,192.168.2.2:49153,Internet → STA 0 (Return)
+5,192.168.2.3:49153,8.8.8.2:80,STA 1 → Internet (Forward)
+6,8.8.8.2:80,192.168.2.3:49153,Internet → STA 1 (Return)
+
