@@ -192,6 +192,9 @@ add_subdirectory(scratch)
 # Build 5G simulations
 add_subdirectory(5g/src)
 
+# Build WiFi test research
+add_subdirectory(wifi_test_research)
+
 # Build test utils
 add_subdirectory(utils)
 
