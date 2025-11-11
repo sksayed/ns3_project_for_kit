@@ -220,7 +220,7 @@ def _print_report(rows: Iterable[dict]) -> None:
             f"{row['protocol']:<12}"
             f"{row['pdr_percent']:>10.2f}"
             f"{row['avg_delay_ms']:>16.2f}"
-            f"{row['throughput_mbps']:>20.2f}"
+            f"{row['throughput_mbps']:>20.4f}"
             f"{row['tx_packets']:>12}"
             f"{row['rx_packets']:>12}"
             f"{row['lost_packets']:>12}"
@@ -238,7 +238,7 @@ def _print_report(rows: Iterable[dict]) -> None:
             f"{'':<12}"
             f"{(total_pdr / counted):>10.2f}"
             f"{(total_delay / counted):>16.2f}"
-            f"{(total_throughput / counted):>20.2f}"
+            f"{(total_throughput / counted):>20.4f}"
             f"{'':>12}"
             f"{'':>12}"
             f"{'':>12}"
@@ -298,7 +298,7 @@ def _write_markdown(rows: Iterable[dict], md_path: Path) -> None:
                         row["protocol"],
                         f"{row['pdr_percent']:.2f}",
                         f"{row['avg_delay_ms']:.2f}",
-                        f"{row['throughput_mbps']:.2f}",
+                        f"{row['throughput_mbps']:.4f}",
                         str(row["tx_packets"]),
                         str(row["rx_packets"]),
                         str(row["lost_packets"]),

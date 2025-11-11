@@ -11,12 +11,23 @@
 #include "ns3/csma-module.h"
 #include "ns3/buildings-module.h"
 #include "ns3/rng-seed-manager.h"
+#include "ns3/config.h"
+#include "ns3/wifi-net-device.h"
+#include "ns3/ipv4-routing-table-entry.h"
+#include "ns3/node-list.h"
+#include "ns3/mac48-address.h"
+#include "ns3/simulator.h"
+#include "ns3/sta-wifi-mac.h"
+
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include <map>
+#include <limits>
+#include <iostream>
 
 using namespace ns3;
                                                                     
@@ -71,7 +82,7 @@ MeshAPDeviceConfig GetMeshDeviceConfig(uint32_t configId)
             // ============================================================================
             return MeshAPDeviceConfig(
                 "TP-Link EAP225-Outdoor",
-                "Verified specs (802.11n mesh @ 2.4GHz, shared band)",
+                "802.11n mesh @ 2.4GHz backhaul, 5GHz hotspot",
                 23.0,                           // txPowerStart (dBm) - Verified 2.4GHz spec
                 23.0,                           // txPowerEnd (dBm)
                 22.0,                           // hotspotTxPower (dBm) - Verified 5GHz spec
@@ -102,7 +113,7 @@ MeshAPDeviceConfig GetMeshDeviceConfig(uint32_t configId)
                 WIFI_STANDARD_80211ax,          // wifiStandard (WiFi 6E)
                 "HeMcs9",                       // dataMode (High MCS - premium device)
                 1,                              // numInterfaces
-                120.0                           // meshRange (m) - Premium device = longer range
+                120.0                           // meshRange (m)
             );
         
         case 3:
@@ -123,7 +134,7 @@ MeshAPDeviceConfig GetMeshDeviceConfig(uint32_t configId)
                 WIFI_STANDARD_80211ax,          // wifiStandard (WiFi 6)
                 "HeMcs7",                       // dataMode (Medium MCS - mid-range device)
                 1,                              // numInterfaces
-                100.0                           // meshRange (m) - Standard range
+                100.0                           // meshRange (m)
             );
         
         case 0:
@@ -142,7 +153,7 @@ MeshAPDeviceConfig GetMeshDeviceConfig(uint32_t configId)
                 WIFI_STANDARD_80211g,           // WiFi standard - current default
                 "ErpOfdmRate54Mbps",            // Data mode (802.11g)
                 1,                              // numInterfaces - single band
-                250.0                           // meshRange (m) - current 250m spacing
+                250.0                           // meshRange (m)
             );
     }
 }
@@ -181,9 +192,188 @@ struct HotspotConfig
     Ipv4InterfaceContainer apInterfaces;
     Ipv4InterfaceContainer staInterfaces;
     std::vector<uint32_t> apNodeIndices;
-    std::vector<uint32_t> staToApIndex;
     uint32_t primaryApNodeIndex;
+    Ssid commonSsid;
+    std::map<Mac48Address, uint32_t> apBssidToMeshIndex;
+    std::map<uint32_t, uint32_t> nodeIdToStaIndex;
+    std::vector<uint32_t> currentStaApIndex;
 };
+
+namespace
+{
+struct StaRoamingContext
+{
+    MeshNetworkConfig* meshConfig{nullptr};
+    HotspotConfig* hotspotConfig{nullptr};
+    bool enabled{false};
+};
+
+StaRoamingContext g_staRoamingContext;
+
+void
+RemoveExistingHostRoute(Ptr<Ipv4StaticRouting> routing, const Ipv4Address& destination)
+{
+    for (uint32_t idx = 0; idx < routing->GetNRoutes(); ++idx)
+    {
+        Ipv4RoutingTableEntry entry = routing->GetRoute(idx);
+        if (entry.IsHost() && entry.GetDest() == destination)
+        {
+            routing->RemoveRoute(idx);
+            return;
+        }
+    }
+}
+
+void
+RemoveExistingDefaultRoute(Ptr<Ipv4StaticRouting> routing)
+{
+    for (uint32_t idx = 0; idx < routing->GetNRoutes(); ++idx)
+    {
+        Ipv4RoutingTableEntry entry = routing->GetRoute(idx);
+        if (entry.IsDefault())
+        {
+            routing->RemoveRoute(idx);
+            return;
+        }
+    }
+}
+
+void
+UpdateStaRouting(uint32_t staIndex, uint32_t apNodeIndex)
+{
+    if (!g_staRoamingContext.enabled || g_staRoamingContext.meshConfig == nullptr ||
+        g_staRoamingContext.hotspotConfig == nullptr)
+    {
+        return;
+    }
+
+    MeshNetworkConfig& meshConfig = *g_staRoamingContext.meshConfig;
+    HotspotConfig& hotspotConfig = *g_staRoamingContext.hotspotConfig;
+
+    NS_ABORT_IF(staIndex >= hotspotConfig.staNodes.GetN());
+    NS_ABORT_IF(apNodeIndex >= meshConfig.meshNodes.GetN());
+
+    Ipv4Address staIp = hotspotConfig.staInterfaces.GetAddress(staIndex);
+    Ipv4Address apMeshIp = meshConfig.meshInterfaces.GetAddress(apNodeIndex);
+    Ipv4Address apHotspotIp = hotspotConfig.apInterfaces.GetAddress(apNodeIndex);
+
+    Ipv4StaticRoutingHelper staticRouting;
+
+    // Update gateway host route
+    Ptr<Node> gatewayNode = meshConfig.meshNodes.Get(0);
+    Ptr<Ipv4> gatewayIpv4 = gatewayNode->GetObject<Ipv4>();
+    Ptr<Ipv4StaticRouting> gatewayRouting = staticRouting.GetStaticRouting(gatewayIpv4);
+    Ptr<NetDevice> gatewayMeshDevice = meshConfig.meshDevices.Get(0);
+    uint32_t gatewayMeshInterface = gatewayIpv4->GetInterfaceForDevice(gatewayMeshDevice);
+    RemoveExistingHostRoute(gatewayRouting, staIp);
+    gatewayRouting->AddHostRouteTo(staIp, apMeshIp, gatewayMeshInterface);
+
+    // Update STA default route
+    Ptr<Node> staNode = hotspotConfig.staNodes.Get(staIndex);
+    Ptr<Ipv4> staIpv4 = staNode->GetObject<Ipv4>();
+    Ptr<Ipv4StaticRouting> staRouting = staticRouting.GetStaticRouting(staIpv4);
+    Ptr<NetDevice> staDevice = hotspotConfig.staDevices.Get(staIndex);
+    uint32_t staInterface = staIpv4->GetInterfaceForDevice(staDevice);
+    RemoveExistingDefaultRoute(staRouting);
+    staRouting->SetDefaultRoute(apHotspotIp, staInterface);
+
+    hotspotConfig.currentStaApIndex[staIndex] = apNodeIndex;
+
+    std::cout << Simulator::Now().GetSeconds() << "s STA " << staIndex
+              << " host route via mesh node " << apNodeIndex << " (STA IP " << staIp
+              << ", AP mesh IP " << apMeshIp << ", AP hotspot IP " << apHotspotIp << ")"
+              << std::endl;
+}
+
+void
+HandleStaAssociation(uint32_t nodeId, Mac48Address apAddress)
+{
+    if (!g_staRoamingContext.enabled || g_staRoamingContext.hotspotConfig == nullptr)
+    {
+        return;
+    }
+
+    HotspotConfig& hotspotConfig = *g_staRoamingContext.hotspotConfig;
+    auto staIt = hotspotConfig.nodeIdToStaIndex.find(nodeId);
+    if (staIt == hotspotConfig.nodeIdToStaIndex.end())
+    {
+        return;
+    }
+    uint32_t staIndex = staIt->second;
+
+    auto apIt = hotspotConfig.apBssidToMeshIndex.find(apAddress);
+    if (apIt == hotspotConfig.apBssidToMeshIndex.end())
+    {
+        NS_LOG_WARN("STA " << staIndex << " associated with unknown AP BSSID " << apAddress);
+        return;
+    }
+    uint32_t apNodeIndex = apIt->second;
+    UpdateStaRouting(staIndex, apNodeIndex);
+}
+
+void
+HandleStaDeAssociation(uint32_t nodeId, Mac48Address apAddress)
+{
+    if (!g_staRoamingContext.enabled || g_staRoamingContext.hotspotConfig == nullptr)
+    {
+        return;
+    }
+
+    HotspotConfig& hotspotConfig = *g_staRoamingContext.hotspotConfig;
+    auto staIt = hotspotConfig.nodeIdToStaIndex.find(nodeId);
+    if (staIt == hotspotConfig.nodeIdToStaIndex.end())
+    {
+        return;
+    }
+    uint32_t staIndex = staIt->second;
+    hotspotConfig.currentStaApIndex[staIndex] = std::numeric_limits<uint32_t>::max();
+
+    std::cout << Simulator::Now().GetSeconds() << "s STA " << staIndex
+              << " disassociated from AP " << apAddress << std::endl;
+}
+
+void
+EnableStaRoamingTracing(MeshNetworkConfig& meshConfig, HotspotConfig& hotspotConfig, bool enableHotspot)
+{
+    if (!enableHotspot)
+    {
+        return;
+    }
+
+    g_staRoamingContext.meshConfig = &meshConfig;
+    g_staRoamingContext.hotspotConfig = &hotspotConfig;
+    g_staRoamingContext.enabled = true;
+
+    std::cout << "STA roaming tracing enabled (shared SSID: " << hotspotConfig.commonSsid.PeekString()
+              << ")" << std::endl;
+
+    uint32_t tracedCount = 0;
+    for (uint32_t i = 0; i < hotspotConfig.staDevices.GetN(); ++i)
+    {
+        Ptr<WifiNetDevice> staDevice = DynamicCast<WifiNetDevice>(hotspotConfig.staDevices.Get(i));
+        if (!staDevice)
+        {
+            continue;
+        }
+        Ptr<StaWifiMac> staMac = DynamicCast<StaWifiMac>(staDevice->GetMac());
+        if (!staMac)
+        {
+            continue;
+        }
+        uint32_t nodeId = hotspotConfig.staNodes.Get(i)->GetId();
+        staMac->TraceConnectWithoutContext("Assoc",
+                                           MakeBoundCallback(&HandleStaAssociation, nodeId));
+        staMac->TraceConnectWithoutContext("DeAssoc",
+                                           MakeBoundCallback(&HandleStaDeAssociation, nodeId));
+        std::cout << "  STA node " << nodeId << " trace hooks attached" << std::endl;
+        ++tracedCount;
+    }
+
+    std::cout << "  Registered association callbacks for " << tracedCount << " STA MAC(s)"
+              << std::endl;
+}
+
+} // namespace
 
 // ============================================================================
 // Helper: Predefined six-node mesh layout positions
@@ -197,6 +387,22 @@ std::vector<Vector> GetSixNodeMeshPositions(double meshApHeight)
         Vector(300.0, 150.0, meshApHeight),
         Vector(150.0, 300.0, meshApHeight),
         Vector(300.0, 300.0, meshApHeight)
+    };
+}
+
+std::vector<Vector> GetCommonStaAnchorPositions()
+{
+    return {
+        Vector(170.0, 10.0, 5.0),   // AP0 +20m east
+        Vector(135.0, 25.0, 5.0),   // AP0 +25m north-west
+        Vector(320.0, 10.0, 5.0),   // AP1 +20m east
+        Vector(285.0, 22.0, 5.0),   // AP1 +25m north-west
+        Vector(170.0, 170.0, 5.0),  // AP2 +20m east
+        Vector(135.0, 165.0, 5.0),  // AP2 +25m south-west
+        Vector(320.0, 170.0, 5.0),  // AP3 +20m east
+        Vector(285.0, 165.0, 5.0),  // AP3 +25m south-west
+        Vector(170.0, 320.0, 5.0),  // AP4 +20m east
+        Vector(320.0, 320.0, 5.0)   // AP5 +20m east
     };
 }
 
@@ -419,105 +625,125 @@ HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes,
 {
     NS_LOG_FUNCTION("Setting up hotspot infrastructure with " << numStaNodes << " STA clients");
     NS_LOG_INFO("Using hotspot TX power: " << deviceCfg.hotspotTxPower << " dBm from device config");
-    
+
     HotspotConfig config;
     config.primaryApNodeIndex = primaryApNodeIndex;
-    
+    config.commonSsid = Ssid("MeshHotspot");
+
     uint32_t meshCount = meshNodes.GetN();
     if (numStaNodes < meshCount)
     {
         NS_LOG_WARN("Requested " << numStaNodes << " STAs but there are " << meshCount
                      << " mesh nodes; some APs will not have dedicated clients.");
     }
-    
+
     // Create STA nodes and install Internet stack
     config.staNodes.Create(numStaNodes);
     InternetStackHelper internetStack;
     internetStack.Install(config.staNodes);
-    
-    // Set up WiFi helpers for hotspot radios
+
+    // Wi-Fi helpers for hotspot radios
     WifiHelper hotspotWifi;
     hotspotWifi.SetStandard(WIFI_STANDARD_80211ac);
-    
+
     YansWifiChannelHelper hotspotChannel;
     hotspotChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
     hotspotChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel");
-    
-    YansWifiPhyHelper hotspotPhy;
-    hotspotPhy.Set("TxPowerStart", DoubleValue(deviceCfg.hotspotTxPower));
-    hotspotPhy.Set("TxPowerEnd", DoubleValue(deviceCfg.hotspotTxPower));
-    hotspotPhy.SetChannel(hotspotChannel.Create());
-    
+
+    Ptr<YansWifiChannel> sharedHotspotChannel = hotspotChannel.Create();
+
+    // AP PHY: high-gain, higher power
+    YansWifiPhyHelper apPhy;
+    apPhy.SetChannel(sharedHotspotChannel);
+    apPhy.Set("TxPowerStart", DoubleValue(deviceCfg.hotspotTxPower));
+    apPhy.Set("TxPowerEnd", DoubleValue(deviceCfg.hotspotTxPower));
+    apPhy.Set("TxGain", DoubleValue(deviceCfg.txGain));
+    apPhy.Set("RxGain", DoubleValue(deviceCfg.rxGain));
+    apPhy.Set("RxSensitivity", DoubleValue(deviceCfg.rxSensitivity));
+    apPhy.Set("RxNoiseFigure", DoubleValue(5.0));
+
+    // STA PHY: handheld client budget
+    YansWifiPhyHelper staPhy;
+    staPhy.SetChannel(sharedHotspotChannel);
+    staPhy.Set("TxPowerStart", DoubleValue(15.0));
+    staPhy.Set("TxPowerEnd", DoubleValue(15.0));
+    staPhy.Set("TxGain", DoubleValue(1.0));
+    staPhy.Set("RxGain", DoubleValue(1.0));
+    staPhy.Set("RxSensitivity", DoubleValue(-90.0));
+    staPhy.Set("RxNoiseFigure", DoubleValue(7.0));
+
+    // Optional ASCII tracing
     AsciiTraceHelper ascii;
-    hotspotPhy.EnableAsciiAll(ascii.CreateFileStream("wifi_test_research/six_node_layout/wifi-test-2-sta-six.tr"));
-    
-    // Install AP devices on every mesh node so each can serve a local STA
+    apPhy.EnableAsciiAll(ascii.CreateFileStream("wifi_test_research/six_node_layout/wifi-test-2-ap-six.tr"));
+    staPhy.EnableAsciiAll(ascii.CreateFileStream("wifi_test_research/six_node_layout/wifi-test-2-sta-six.tr"));
+
+    // Install AP devices on every mesh node (shared SSID for roaming)
     for (uint32_t i = 0; i < meshCount; ++i)
     {
         config.apNodeIndices.push_back(i);
-        Ssid apSsid = Ssid("Node" + std::to_string(i) + "-Hotspot");
         WifiMacHelper apMac;
         apMac.SetType("ns3::ApWifiMac",
-                      "Ssid", SsidValue(apSsid),
+                      "Ssid", SsidValue(config.commonSsid),
                       "BeaconGeneration", BooleanValue(true),
                       "BeaconInterval", TimeValue(MicroSeconds(102400)));
-        NetDeviceContainer apDev = hotspotWifi.Install(hotspotPhy, apMac, meshNodes.Get(i));
+        NetDeviceContainer apDev = hotspotWifi.Install(apPhy, apMac, meshNodes.Get(i));
         config.apDevices.Add(apDev);
+
+        Ptr<WifiNetDevice> apWifiDev = DynamicCast<WifiNetDevice>(apDev.Get(0));
+        if (apWifiDev)
+        {
+            Mac48Address bssid = apWifiDev->GetMac()->GetBssid(0);
+            config.apBssidToMeshIndex[bssid] = i;
+        }
     }
-    
-    // Map STAs to AP indices using round-robin assignment
+
+    // Install STA devices that can freely roam
     for (uint32_t i = 0; i < numStaNodes; ++i)
     {
-        uint32_t apIndex = meshCount > 0 ? (i % meshCount) : 0;
-        config.staToApIndex.push_back(apIndex);
-    }
-    
-    // Install STA devices with SSIDs matching their target APs
-    for (uint32_t i = 0; i < numStaNodes; ++i)
-    {
-        uint32_t apIndex = config.staToApIndex[i];
-        Ssid staSsid = Ssid("Node" + std::to_string(apIndex) + "-Hotspot");
         WifiMacHelper staMac;
         staMac.SetType("ns3::StaWifiMac",
-                       "Ssid", SsidValue(staSsid),
+                       "Ssid", SsidValue(config.commonSsid),
                        "ActiveProbing", BooleanValue(true));
-        NetDeviceContainer staDev = hotspotWifi.Install(hotspotPhy, staMac, config.staNodes.Get(i));
+        NetDeviceContainer staDev = hotspotWifi.Install(staPhy, staMac, config.staNodes.Get(i));
         config.staDevices.Add(staDev);
+
+        Ptr<Node> staNode = config.staNodes.Get(i);
+        config.nodeIdToStaIndex[staNode->GetId()] = i;
+        config.currentStaApIndex.push_back(std::numeric_limits<uint32_t>::max());
     }
-    
-    // Assign unique IP ranges: STAs get 192.168.1.1-10, APs use .101+ in same subnet
+
+    // Assign unique IP ranges
     Ipv4AddressHelper staAddress;
     staAddress.SetBase("192.168.1.0", "255.255.255.0", "0.0.0.1");
     config.staInterfaces = staAddress.Assign(config.staDevices);
-    
+
     Ipv4AddressHelper apAddress;
     apAddress.SetBase("192.168.1.0", "255.255.255.0", "0.0.0.101");
     config.apInterfaces = apAddress.Assign(config.apDevices);
-    
-    // Configure deterministic STA mobility near their serving APs
+
+    // Configure STA initial positions near their associated APs using anchor list
+    const std::vector<Vector> anchorPositions = GetCommonStaAnchorPositions();
+
     for (uint32_t i = 0; i < numStaNodes; ++i)
     {
-        uint32_t apIndex = config.staToApIndex[i];
-        Ptr<ConstantPositionMobilityModel> apMobility = 
-            meshNodes.Get(apIndex)->GetObject<ConstantPositionMobilityModel>();
-        Vector apPos = apMobility->GetPosition();
-        
-        constexpr double kPi = 3.14159265358979323846;
-        double offset = 5.0;
-        double angle = (i % 8) * (kPi / 4.0);
-        Vector staPos(apPos.x + offset * std::cos(angle),
-                      apPos.y + offset * std::sin(angle),
-                      staHeight);
-        double radius = 5.0;
-        
+        Vector staPos = anchorPositions.empty()
+                            ? Vector(0.0, 0.0, staHeight > 0.0 ? staHeight : 1.5)
+                            : anchorPositions[i % anchorPositions.size()];
+
+        // Adjust Z if caller requested a specific STA height
+        if (staHeight > 0.0)
+        {
+            staPos.z = staHeight;
+        }
+
         Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
         posAlloc->Add(staPos);
-        
+
         MobilityHelper staMobilityHelper;
         staMobilityHelper.SetPositionAllocator(posAlloc);
         staMobilityHelper.SetMobilityModel("ns3::GaussMarkovMobilityModel",
-            "Bounds", BoxValue(Box(apPos.x - radius, apPos.x + radius,
-                                    apPos.y - radius, apPos.y + radius,
+            "Bounds", BoxValue(Box(0.0, 400.0,
+                                    0.0, 400.0,
                                     0.0, 30.0)),
             "TimeStep", TimeValue(Seconds(1.0)),
             "Alpha", DoubleValue(0.85),
@@ -528,13 +754,17 @@ HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes,
             "NormalDirection", StringValue("ns3::NormalRandomVariable[Mean=0.0|Variance=0.1|Bound=0.2]"),
             "NormalPitch", StringValue("ns3::NormalRandomVariable[Mean=0.0|Variance=0.01|Bound=0.02]"));
         staMobilityHelper.Install(config.staNodes.Get(i));
-        
-        NS_LOG_INFO("  STA " << i << " initial position near AP node " << apIndex
-                    << " at (" << staPos.x << ", " << staPos.y << ", " << staPos.z << ")");
+
+        uint32_t nodeId = config.staNodes.Get(i)->GetId();
+        std::cout << "Anchored STA spawn " << i << " at ("
+                  << staPos.x << ", " << staPos.y << ", " << staPos.z
+                  << ") [nodeId " << nodeId << "]" << std::endl;
+        NS_LOG_INFO("  STA " << i << " (nodeId " << nodeId << ") initial position ("
+                    << staPos.x << ", " << staPos.y << ", " << staPos.z << ")");
     }
-    
+
     BuildingsHelper::Install(config.staNodes);
-    
+
     NS_LOG_INFO("Hotspot infrastructure setup complete: " << meshCount
                 << " AP nodes with " << numStaNodes << " STA clients on 192.168.1.0/24");
     return config;
@@ -593,17 +823,7 @@ void ConfigureStaticRouting(const MeshNetworkConfig& meshConfig,
             
             if (enableHotspot)
             {
-                Ptr<NetDevice> gatewayMeshDevice = meshConfig.meshDevices.Get(0);
-                uint32_t gatewayMeshInterface = ipv4->GetInterfaceForDevice(gatewayMeshDevice);
-                for (uint32_t staIdx = 0; staIdx < hotspotConfig.staNodes.GetN(); ++staIdx)
-                {
-                    Ipv4Address staIp = hotspotConfig.staInterfaces.GetAddress(staIdx);
-                    uint32_t apNodeIdx = hotspotConfig.staToApIndex[staIdx];
-                    Ipv4Address apMeshIp = meshConfig.meshInterfaces.GetAddress(apNodeIdx);
-                    routing->AddHostRouteTo(staIp, apMeshIp, gatewayMeshInterface);
-                    NS_LOG_INFO("Gateway host route to STA " << staIdx << " (" << staIp
-                                 << ") via mesh node " << apNodeIdx << " IP " << apMeshIp);
-                }
+                NS_LOG_INFO("Gateway host routes to STAs will be managed dynamically on association events");
             }
         }
         else
@@ -650,24 +870,6 @@ void ConfigureStaticRouting(const MeshNetworkConfig& meshConfig,
     serverRouting->SetDefaultRoute(ispRouterIp, serverInterface);
     
     // --- Configure STA nodes (if hotspot enabled) ---
-    if (enableHotspot)
-    {
-        for (uint32_t i = 0; i < hotspotConfig.staNodes.GetN(); i++)
-        {
-            Ptr<Ipv4> ipv4Sta = hotspotConfig.staNodes.Get(i)->GetObject<Ipv4>();
-            Ptr<Ipv4StaticRouting> staRouting = staticRouting.GetStaticRouting(ipv4Sta);
-            
-            uint32_t apNodeIdx = hotspotConfig.staToApIndex[i];
-            Ipv4Address apHotspotIp = hotspotConfig.apInterfaces.GetAddress(apNodeIdx);
-            Ptr<NetDevice> staDevice = hotspotConfig.staDevices.Get(i);
-            uint32_t staInterface = ipv4Sta->GetInterfaceForDevice(staDevice);
-            
-            staRouting->SetDefaultRoute(apHotspotIp, staInterface);
-            NS_LOG_INFO("STA " << i << " default route to AP node " << apNodeIdx
-                        << " hotspot IP " << apHotspotIp);
-        }
-    }
-    
     NS_LOG_INFO("Static routing configured for all nodes");
 }
 
@@ -712,8 +914,8 @@ void SetupApplications(const MeshNetworkConfig& meshConfig,
         return;
     }
     
-    const uint32_t smallTransferBytes = 10 * 1024;   // 10 KB
-    const uint32_t largeTransferBytes = 1 * 1024 * 1024; // 1 MB
+    const uint32_t smallTransferBytes = 1 * 1024 * 1024;   // 1 MB
+    const uint32_t largeTransferBytes = 1 * 1024 * 1024;   // 1 MB
 
     Address remoteHttpAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), httpPort));
     Address remoteHttpsAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), httpsPort));
@@ -733,7 +935,7 @@ void SetupApplications(const MeshNetworkConfig& meshConfig,
         bulk.SetAttribute("SendSize", UintegerValue(packetSize));
         ApplicationContainer app = bulk.Install(hotspotConfig.staNodes.Get(staIndex));
         app.Start(Seconds(5.0 + offset));
-        app.Stop(Seconds(9.0));
+        app.Stop(Seconds(30.0));
         clientApps.Add(app);
     };
     
@@ -750,7 +952,7 @@ void SetupApplications(const MeshNetworkConfig& meshConfig,
         voipClient.SetAttribute("MaxBytes", UintegerValue(maxBytes));
         ApplicationContainer app = voipClient.Install(hotspotConfig.staNodes.Get(staIndex));
         app.Start(Seconds(5.0 + offset));
-        app.Stop(Seconds(9.0));
+        app.Stop(Seconds(30.0));
         clientApps.Add(app);
     };
     
@@ -810,7 +1012,7 @@ void DisplaySimulationInfo(uint32_t nNodes,
         layoutDescription = "Custom layout";
     }
 
-    NS_LOG_UNCOND("  Mesh Nodes: " << nNodes << " (" << layoutDescription << ")");
+    NS_LOG_UNCOND("  Mesh Nodes: " << nNodes);
     NS_LOG_UNCOND("  Mesh Network: 10.1.1.0/24");
     NS_LOG_UNCOND("  Gateway: Node 0 -> Internet via 1Gbps Ethernet (192.168.100.1)");
     NS_LOG_UNCOND("  Internet Server: 8.8.8.2 (simulated external server)");
@@ -818,11 +1020,11 @@ void DisplaySimulationInfo(uint32_t nNodes,
     {
         NS_LOG_UNCOND("-----------------------------------------------------------------------");
         NS_LOG_UNCOND("  Hotspot Enabled:");
-        NS_LOG_UNCOND("    AP Nodes: 0-" << (nNodes - 1) << ");");
+        NS_LOG_UNCOND("    AP Nodes: 0-" << (nNodes - 1) << ")");
         NS_LOG_UNCOND("    Hotspot Network: 192.168.1.0/24");
-        NS_LOG_UNCOND("    STA Clients: " << numStaNodes << " (one per mesh node, Node " << apNodeIndex << " hosts two)");
+    NS_LOG_UNCOND("    STA Clients: " << numStaNodes);
         NS_LOG_UNCOND("    STA Mobility: GaussMarkov 3D (0.3-0.8 m/s, 400m x 400m, Z: 0-30m)");
-        NS_LOG_UNCOND("    STA Traffic: STA -> Server 8.8.8.2 via local AP -> Mesh -> Gateway");
+        NS_LOG_UNCOND("    STA Traffic: STA -> Access AP -> Mesh -> Gateway -> Server");
     }
     else
     {
@@ -1010,13 +1212,13 @@ int main(int argc, char* argv[])
     double nodeSpacing = 150.0;    // Approximate spacing used for fallback positioning (meters)
     uint32_t tcpPacketSize = 1400; // TCP packet size in bytes
     double tcpInterval = 5.0;      // TCP interval between packets (seconds)
-    double simTime = 10.0;         // Simulation time (seconds)
+    double simTime = 30.0;         // Simulation time (seconds)
     bool enableHotspot = true;     // Enable hotspot (AP + STA) feature
     uint32_t apNodeIndex = 5;      // Which mesh node acts as AP
     uint32_t numStaNodes = 10;     // Number of STA clients (all TCP)
     double meshApHeight = 1.5;     // Mesh AP height (meters) - for height optimization tests
     double staHeight = 5.0;        // STA node height (meters) - for vertical spacing tests
-    uint32_t meshConfig = 0;       // Mesh AP device configuration (0=default, 1=TP-Link, 2=Orbi, 3=ZenWiFi)
+    uint32_t meshConfig = 1;       // Mesh AP device configuration (0=Default, 1=TP-Link EAP225, 2=Netgear Orbi 960, 3=Asus ZenWiFi XT8)
 
     CommandLine cmd;
     cmd.AddValue("nNodes", "Number of mesh nodes", nNodes);
@@ -1089,16 +1291,6 @@ int main(int argc, char* argv[])
     NS_LOG_UNCOND("  RX Sensitivity: " << deviceCfg.rxSensitivity << " dBm");
     NS_LOG_UNCOND("  Antenna Gain (RX/TX): " << deviceCfg.rxGain << "/" << deviceCfg.txGain << " dB");
     NS_LOG_UNCOND("  Number of Interfaces: " << deviceCfg.numInterfaces);
-    NS_LOG_UNCOND("  Expected Range: " << deviceCfg.meshRange << " meters");
-    NS_LOG_UNCOND("=======================================================================");
-    NS_LOG_UNCOND("Auto-Calculated Network Topology:");
-    NS_LOG_UNCOND("=======================================================================");
-    NS_LOG_UNCOND("  Layout: Six-node custom anchor placement (see GetSixNodeMeshPositions)");
-    NS_LOG_UNCOND("  Anchor Bounding Box (min→max): " << actualCoverageX << "m × " << actualCoverageY << "m");
-    NS_LOG_UNCOND("  Total Mesh Nodes: " << nNodes << " APs");
-    NS_LOG_UNCOND("  Approx Anchor Separation: ~" << nodeSpacing << "m");
-    NS_LOG_UNCOND("  Vertical Range: 0-30m (Buildings at 15m height)");
-    NS_LOG_UNCOND("  AP Node: Node " << apNodeIndex << " (last anchor in layout)");
     NS_LOG_UNCOND("=======================================================================\n");
 
     // ========================================================================
@@ -1136,6 +1328,11 @@ int main(int argc, char* argv[])
     ConfigureStaticRouting(meshNetConfig, internetConfig, hotspotConfig, nNodes, enableHotspot);
 
     // ========================================================================
+    // STEP 7.5: Enable STA roaming callbacks (association-driven routing updates)
+    // ========================================================================
+    EnableStaRoamingTracing(meshNetConfig, hotspotConfig, enableHotspot);
+
+    // ========================================================================
     // STEP 7: Set Up Applications
     // ========================================================================
     SetupApplications(meshNetConfig, internetConfig, hotspotConfig, simTime, enableHotspot, packetSize);
@@ -1164,6 +1361,43 @@ int main(int argc, char* argv[])
     // STEP 10: Save Results and Cleanup
     // ========================================================================
     SaveFlowMonitorResults(monitor, flowmon);
+
+    if (enableHotspot)
+    {
+        std::cout << "\nFinal STA -> AP associations\n";
+        std::cout << "----------------------------------------\n";
+        for (uint32_t i = 0; i < hotspotConfig.currentStaApIndex.size(); ++i)
+        {
+            uint32_t apIdx = hotspotConfig.currentStaApIndex[i];
+            Ipv4Address staIp = hotspotConfig.staInterfaces.GetAddress(i);
+            if (apIdx != std::numeric_limits<uint32_t>::max())
+            {
+                std::cout << "STA " << i << " (" << staIp << ") attached to mesh node "
+                          << apIdx << " (AP BSSID ";
+                bool printed = false;
+                for (const auto& entry : hotspotConfig.apBssidToMeshIndex)
+                {
+                    if (entry.second == apIdx)
+                    {
+                        std::cout << entry.first;
+                        printed = true;
+                        break;
+                    }
+                }
+                if (!printed)
+                {
+                    std::cout << "unknown";
+                }
+                std::cout << ")\n";
+            }
+            else
+            {
+                std::cout << "STA " << i << " (" << staIp << ") no active association\n";
+            }
+        }
+        std::cout << "----------------------------------------\n\n";
+    }
+
     Simulator::Destroy();
 
     std::ostringstream parseCmd;
@@ -1182,3 +1416,4 @@ int main(int argc, char* argv[])
 
     return 0;
 }
+
