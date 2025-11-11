@@ -5,14 +5,14 @@
     "node_spacing_meters": 200
   },
   "traffic_configuration": {
-    "packet_size_bytes": 1024,
-    "num_sta_nodes": 2
+    "packet_size_bytes": 1400,
+    "num_sta_nodes": 10
   },
   "mesh_configuration": {
     "config_id": 0
   },
   "ip_configuration": {
-    "source_ip": "192.168.2.2",
+    "source_ip": "192.168.1.2",
     "destination_ip": "8.8.8.2"
   },
   "port_information": {

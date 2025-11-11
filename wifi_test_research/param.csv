@@ -1,9 +1,0 @@
-Parameter,✅ TP-Link EAP225-Outdoor,Netgear Orbi 960 (RBKE963),Asus ZenWiFi AX (XT8)
-Mesh Protocol,Proprietary Omada Mesh(Also supports 802.11s),Proprietary Orbi Mesh,"Proprietary AiMesh(Uses 802.11k/v, not 802.11s)"
-WiFi Standards,802.11a/b/g/n/ac (WiFi 5),802.11a/b/g/n/ac/ax (WiFi 6E),802.11a/b/g/n/ac/ax (WiFi 6)
-Radio Bands,"Dual-Band (2.4G, 5G)","Quad-Band (2.4G, 5G-1, 5G-2, 6G)","Tri-Band (2.4G, 5G-1, 5G-2)"
-Dedicated Backhaul,No,Yes (Dedicated 5G/6G band),Yes (Dedicated 5G band)
-Tx Power (2.4 GHz),23 dBm (FCC),Not specified (FCC reports only),Not specified (FCC reports only)
-Tx Power (5 GHz),22 dBm (FCC),Not specified (FCC reports only),Not specified (FCC reports only)
-Rx Sensitivity (2.4 GHz),-90 dBm (@ 6 Mbps)-71 dBm (@ 300 Mbps),Not specified,Not specified
-Rx Sensitivity (5 GHz),-90 dBm (@ 6 Mbps)-63 dBm (@ 867 Mbps),Not specified,Not specified

@@ -1,4 +1,4 @@
-                                                                                                          #include "ns3/core-module.h"
+#include "ns3/core-module.h"
 #include "ns3/network-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
@@ -10,9 +10,13 @@
 #include "ns3/animation-interface.h"
 #include "ns3/csma-module.h"
 #include "ns3/buildings-module.h"
+#include "ns3/rng-seed-manager.h"
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <vector>
+#include <algorithm>
 
 using namespace ns3;
                                                                     
@@ -174,8 +178,11 @@ struct HotspotConfig
     NodeContainer staNodes;
     NetDeviceContainer apDevices;
     NetDeviceContainer staDevices;
-    Ipv4InterfaceContainer hotspotInterfaces;
-    uint32_t apNodeIndex;  // Which mesh node acts as AP (e.g., Node 8)
+    Ipv4InterfaceContainer apInterfaces;
+    Ipv4InterfaceContainer staInterfaces;
+    std::vector<uint32_t> apNodeIndices;
+    std::vector<uint32_t> staToApIndex;
+    uint32_t primaryApNodeIndex;
 };
 
 // ============================================================================
@@ -258,75 +265,48 @@ MeshNetworkConfig SetupMeshNetwork(uint32_t nNodes, uint32_t gridWidth, double n
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     mobility.Install(config.meshNodes);
     
-    // *** ENABLE ALL 4 BUILDINGS FOR TESTING ***
-    double buildingHeight = 15.0;   // 15 meters tall buildings
-    
-    // Strategic placement: Block direct paths between mesh nodes to force multi-hop routing
-    // Grid layout:  0 - 1 - 2
-    //               3 - 4 - 5
-    //               6 - 7 - 8
-    
-    // ADAPTIVE BUILDING POSITIONING - works with any node spacing
-    // Buildings sized at 30% of node spacing, offset by 35% from grid lines
-    // This ensures buildings occupy 35%-65% of each grid cell
-    // Nodes are at 0%, 100%, 200% - safely away from buildings
-    double buildingSize = nodeSpacing * 0.3;      // 30% of spacing
-    double buildingOffset = nodeSpacing * 0.35;   // 35% from grid line
-    
-    // Building 1: Between Node 0 and Node 4 (blocks diagonal)
-    // Positioned at 35%-65% of first grid cell
-    Ptr<Building> building1 = CreateObject<Building>();
-    building1->SetBoundaries(Box(buildingOffset, buildingOffset + buildingSize,
-                                 buildingOffset, buildingOffset + buildingSize,
-                                 0.0, buildingHeight));
-    building1->SetBuildingType(Building::Office);
-    building1->SetExtWallsType(Building::ConcreteWithWindows);
-    building1->SetNFloors(3);
-    building1->SetNRoomsX(5);
-    building1->SetNRoomsY(4);
-    
-    // Building 2: Between Node 4 and Node 8 (blocks diagonal)
-    // Positioned at 135%-165% of grid (in second grid cell)
-    Ptr<Building> building2 = CreateObject<Building>();
-    building2->SetBoundaries(Box(nodeSpacing + buildingOffset, nodeSpacing + buildingOffset + buildingSize,
-                                 nodeSpacing + buildingOffset, nodeSpacing + buildingOffset + buildingSize,
-                                 0.0, buildingHeight));
-    building2->SetBuildingType(Building::Commercial);
-    building2->SetExtWallsType(Building::ConcreteWithWindows);
-    building2->SetNFloors(3);
-    building2->SetNRoomsX(6);
-    building2->SetNRoomsY(5);
-    
-    // Building 3: In grid cell (1,0) - between nodes 1,2,4,5
-    // Positioned at 135%-165% X, 35%-65% Y (different grid cell gap)
-    Ptr<Building> building3 = CreateObject<Building>();
-    building3->SetBoundaries(Box(nodeSpacing + buildingOffset, nodeSpacing + buildingOffset + buildingSize,
-                                 buildingOffset, buildingOffset + buildingSize,
-                                 0.0, buildingHeight));
-    building3->SetBuildingType(Building::Office);
-    building3->SetExtWallsType(Building::ConcreteWithWindows);
-    building3->SetNFloors(3);
-    building3->SetNRoomsX(4);
-    building3->SetNRoomsY(3);
-    
-    // Building 4: In grid cell (0,1) - between nodes 3,4,6,7
-    // Positioned at 35%-65% X, 135%-165% Y (different grid cell gap)
-    Ptr<Building> building4 = CreateObject<Building>();
-    building4->SetBoundaries(Box(buildingOffset, buildingOffset + buildingSize,
-                                 nodeSpacing + buildingOffset, nodeSpacing + buildingOffset + buildingSize,
-                                 0.0, buildingHeight));
-    building4->SetBuildingType(Building::Commercial);
-    building4->SetExtWallsType(Building::ConcreteWithWindows);
-    building4->SetNFloors(3);
-    building4->SetNRoomsX(3);
-    building4->SetNRoomsY(5);
-    
-    // Aggregate building information to all mesh nodes
+    // Fixed building layout to match 5G/LTE playfield scenarios (400m x 400m field)
+    BuildingContainer buildings;
+    Ptr<Building> leftBelow = CreateObject<Building>();
+    leftBelow->SetBoundaries(Box(0.0, 60.0, 96.0, 104.0, 0.0, 10.0));
+    leftBelow->SetBuildingType(Building::Residential);
+    leftBelow->SetExtWallsType(Building::ConcreteWithWindows);
+    buildings.Add(leftBelow);
+    Ptr<Building> rightBelow = CreateObject<Building>();
+    rightBelow->SetBoundaries(Box(340.0, 400.0, 96.0, 104.0, 0.0, 10.0));
+    rightBelow->SetBuildingType(Building::Residential);
+    rightBelow->SetExtWallsType(Building::ConcreteWithWindows);
+    buildings.Add(rightBelow);
+    Ptr<Building> leftAbove = CreateObject<Building>();
+    leftAbove->SetBoundaries(Box(0.0, 60.0, 296.0, 304.0, 0.0, 10.0));
+    leftAbove->SetBuildingType(Building::Residential);
+    leftAbove->SetExtWallsType(Building::ConcreteWithWindows);
+    buildings.Add(leftAbove);
+    Ptr<Building> rightAbove = CreateObject<Building>();
+    rightAbove->SetBoundaries(Box(340.0, 400.0, 296.0, 304.0, 0.0, 10.0));
+    rightAbove->SetBuildingType(Building::Residential);
+    rightAbove->SetExtWallsType(Building::ConcreteWithWindows);
+    buildings.Add(rightAbove);
+    Ptr<Building> cluster250a = CreateObject<Building>();
+    cluster250a->SetBoundaries(Box(80.0, 140.0, 300.0, 308.0, 0.0, 15.0));
+    cluster250a->SetBuildingType(Building::Office);
+    cluster250a->SetExtWallsType(Building::ConcreteWithWindows);
+    buildings.Add(cluster250a);
+    Ptr<Building> cluster250b = CreateObject<Building>();
+    cluster250b->SetBoundaries(Box(170.0, 250.0, 300.0, 308.0, 0.0, 12.0));
+    cluster250b->SetBuildingType(Building::Office);
+    cluster250b->SetExtWallsType(Building::ConcreteWithWindows);
+    buildings.Add(cluster250b);
+    Ptr<Building> cluster50 = CreateObject<Building>();
+    cluster50->SetBoundaries(Box(255.0, 335.0, 20.0, 28.0, 0.0, 18.0));
+    cluster50->SetBuildingType(Building::Commercial);
+    cluster50->SetExtWallsType(Building::ConcreteWithWindows);
+    buildings.Add(cluster50);
+
     BuildingsHelper::Install(config.meshNodes);
-    
-    NS_LOG_INFO("Mesh network setup complete with ALL 4 ADAPTIVE buildings");
-    NS_LOG_INFO("  Building 1-4: ConcreteWithWindows, 15m tall");
-    NS_LOG_INFO("  Node spacing: " << nodeSpacing << "m, Building size: " << buildingSize << "m");
+
+    NS_LOG_INFO("Mesh network setup complete with fixed building layout (400m x 400m x 30m)");
+    NS_LOG_INFO("  Node spacing: " << nodeSpacing << "m");
     return config;
 }
 
@@ -396,7 +376,7 @@ InternetConfig SetupInternetInfrastructure(NodeContainer meshNodes, double nodeS
 // Function: Set up hotspot infrastructure (AP on mesh node + mobile STA clients)
 // ============================================================================
 HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes, 
-                                          uint32_t apNodeIndex,
+                                          uint32_t primaryApNodeIndex,
                                           uint32_t numStaNodes,
                                           double nodeSpacing,
                                           double staHeight,
@@ -406,142 +386,144 @@ HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes,
     NS_LOG_INFO("Using hotspot TX power: " << deviceCfg.hotspotTxPower << " dBm from device config");
     
     HotspotConfig config;
-    config.apNodeIndex = apNodeIndex;
+    config.primaryApNodeIndex = primaryApNodeIndex;
     
-    // Create STA nodes
+    uint32_t meshCount = meshNodes.GetN();
+    if (numStaNodes < meshCount)
+    {
+        NS_LOG_WARN("Requested " << numStaNodes << " STAs but there are " << meshCount
+                     << " mesh nodes; some APs will not have dedicated clients.");
+    }
+    
+    // Create STA nodes and install Internet stack
     config.staNodes.Create(numStaNodes);
-    
-    // Install Internet stack on STA nodes
     InternetStackHelper internetStack;
     internetStack.Install(config.staNodes);
     
-    // Set up separate WiFi channel for AP/STA (802.11ac hotspot)
+    // Set up WiFi helpers for hotspot radios
     WifiHelper hotspotWifi;
     hotspotWifi.SetStandard(WIFI_STANDARD_80211ac);
     
     YansWifiChannelHelper hotspotChannel;
     hotspotChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
-    
-    // Use ONLY HybridBuildingsPropagationLossModel (includes distance loss internally)
-    // NO extra arguments - use default parameters
     hotspotChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel");
     
     YansWifiPhyHelper hotspotPhy;
-    
-    // Set hotspot Tx power from device configuration (separate from mesh backhaul)
     hotspotPhy.Set("TxPowerStart", DoubleValue(deviceCfg.hotspotTxPower));
     hotspotPhy.Set("TxPowerEnd", DoubleValue(deviceCfg.hotspotTxPower));
-    
     hotspotPhy.SetChannel(hotspotChannel.Create());
     
-    // Enable ASCII tracing *before* installing devices
     AsciiTraceHelper ascii;
     hotspotPhy.EnableAsciiAll(ascii.CreateFileStream("wifi_test_research/wifi-test-2-sta.tr"));
     
-    // Configure WiFi MAC for AP and STA
-    Ssid ssid = Ssid("Node" + std::to_string(apNodeIndex) + "-Hotspot");
-    WifiMacHelper hotspotMac;
-    
-    // Install AP device on the designated mesh node (e.g., Node 8)
-    hotspotMac.SetType("ns3::ApWifiMac",
-                       "Ssid", SsidValue(ssid),
-                       "BeaconGeneration", BooleanValue(true),
-                       "BeaconInterval", TimeValue(MicroSeconds(102400)));
-    config.apDevices = hotspotWifi.Install(hotspotPhy, hotspotMac, meshNodes.Get(apNodeIndex));
-    
-    // Install STA devices on mobile clients
-    hotspotMac.SetType("ns3::StaWifiMac",
-                       "Ssid", SsidValue(ssid),
-                       "ActiveProbing", BooleanValue(false));
-    config.staDevices = hotspotWifi.Install(hotspotPhy, hotspotMac, config.staNodes);
-    
-    // Assign IP addresses to hotspot network (192.168.2.0/24)
-    Ipv4AddressHelper hotspotAddress;
-    hotspotAddress.SetBase("192.168.2.0", "255.255.255.0");
-    
-    // Combine AP and STA devices for IP assignment
-    NetDeviceContainer hotspotDevices;
-    hotspotDevices.Add(config.apDevices);
-    hotspotDevices.Add(config.staDevices);
-    config.hotspotInterfaces = hotspotAddress.Assign(hotspotDevices);
-    
-    // Get AP node position for centering STA mobility area
-    Ptr<ConstantPositionMobilityModel> apMobility = 
-        meshNodes.Get(apNodeIndex)->GetObject<ConstantPositionMobilityModel>();
-    Vector apPosition = apMobility->GetPosition();
-    
-    // Set up mobile STA nodes with GaussMarkov 3D mobility
-    // 20m x 20m area centered on AP position, 3D movement (0-30m height)
-    
-    // Define movement bounds (20m x 20m area, 0-30m height)
-    double movementRadius = 10.0;  // 10m radius = 20m x 20m area
-    double minX = apPosition.x - movementRadius;
-    double maxX = apPosition.x + movementRadius;
-    double minY = apPosition.y - movementRadius;
-    double maxY = apPosition.y + movementRadius;
-    double minZ = 0.0;
-    double maxZ = 30.0;
-    
-    // Set up GaussMarkov mobility for each STA individually
-    for (uint32_t i = 0; i < config.staNodes.GetN(); i++)
+    // Install AP devices on every mesh node so each can serve a local STA
+    for (uint32_t i = 0; i < meshCount; ++i)
     {
-        // Random initial position within bounds
-        double initX = apPosition.x + (rand() % 20 - 10);  // ±10m from AP
-        double initY = apPosition.y + (rand() % 20 - 10);
-        double initZ = staHeight + (rand() % 10);  // Start near staHeight parameter
+        config.apNodeIndices.push_back(i);
+        Ssid apSsid = Ssid("Node" + std::to_string(i) + "-Hotspot");
+        WifiMacHelper apMac;
+        apMac.SetType("ns3::ApWifiMac",
+                      "Ssid", SsidValue(apSsid),
+                      "BeaconGeneration", BooleanValue(true),
+                      "BeaconInterval", TimeValue(MicroSeconds(102400)));
+        NetDeviceContainer apDev = hotspotWifi.Install(hotspotPhy, apMac, meshNodes.Get(i));
+        config.apDevices.Add(apDev);
+    }
+    
+    // Map STAs to AP indices (one per mesh node, extras stay with the primary AP)
+    for (uint32_t i = 0; i < numStaNodes; ++i)
+    {
+        uint32_t apIndex = (i < meshCount) ? i : primaryApNodeIndex;
+        config.staToApIndex.push_back(apIndex);
+    }
+    
+    // Install STA devices with SSIDs matching their target APs
+    for (uint32_t i = 0; i < numStaNodes; ++i)
+    {
+        uint32_t apIndex = config.staToApIndex[i];
+        Ssid staSsid = Ssid("Node" + std::to_string(apIndex) + "-Hotspot");
+        WifiMacHelper staMac;
+        staMac.SetType("ns3::StaWifiMac",
+                       "Ssid", SsidValue(staSsid),
+                       "ActiveProbing", BooleanValue(true));
+        NetDeviceContainer staDev = hotspotWifi.Install(hotspotPhy, staMac, config.staNodes.Get(i));
+        config.staDevices.Add(staDev);
+    }
+    
+    // Assign unique IP ranges: STAs get 192.168.1.1-10, APs use .101+ in same subnet
+    Ipv4AddressHelper staAddress;
+    staAddress.SetBase("192.168.1.0", "255.255.255.0", "0.0.0.1");
+    config.staInterfaces = staAddress.Assign(config.staDevices);
+    
+    Ipv4AddressHelper apAddress;
+    apAddress.SetBase("192.168.1.0", "255.255.255.0", "0.0.0.101");
+    config.apInterfaces = apAddress.Assign(config.apDevices);
+    
+    // Configure deterministic STA mobility near their serving APs
+    for (uint32_t i = 0; i < numStaNodes; ++i)
+    {
+        uint32_t apIndex = config.staToApIndex[i];
+        Ptr<ConstantPositionMobilityModel> apMobility = 
+            meshNodes.Get(apIndex)->GetObject<ConstantPositionMobilityModel>();
+        Vector apPos = apMobility->GetPosition();
         
-        MobilityHelper staMobility;
+        constexpr double kPi = 3.14159265358979323846;
+        double offset = 5.0;
+        double angle = (i % 8) * (kPi / 4.0);
+        Vector staPos(apPos.x + offset * std::cos(angle),
+                      apPos.y + offset * std::sin(angle),
+                      staHeight);
+        double radius = 5.0;
+        
         Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
-        posAlloc->Add(Vector(initX, initY, initZ));
+        posAlloc->Add(staPos);
         
-        staMobility.SetPositionAllocator(posAlloc);
-        staMobility.SetMobilityModel("ns3::GaussMarkovMobilityModel",
-            "Bounds", BoxValue(Box(minX, maxX, minY, maxY, minZ, maxZ)),
+        MobilityHelper staMobilityHelper;
+        staMobilityHelper.SetPositionAllocator(posAlloc);
+        staMobilityHelper.SetMobilityModel("ns3::GaussMarkovMobilityModel",
+            "Bounds", BoxValue(Box(apPos.x - radius, apPos.x + radius,
+                                    apPos.y - radius, apPos.y + radius,
+                                    0.0, 30.0)),
             "TimeStep", TimeValue(Seconds(1.0)),
-            "Alpha", DoubleValue(0.85),  // 85% memory - smooth, correlated movement
-            "MeanVelocity", StringValue("ns3::UniformRandomVariable[Min=0.3|Max=0.8]"),  // Pedestrian speed
-            "MeanDirection", StringValue("ns3::UniformRandomVariable[Min=0|Max=6.283185307]"),  // 0-2π radians
-            "MeanPitch", StringValue("ns3::UniformRandomVariable[Min=-0.05|Max=0.05]"),  // Slight vertical angle
+            "Alpha", DoubleValue(0.85),
+            "MeanVelocity", StringValue("ns3::UniformRandomVariable[Min=0.3|Max=0.8]"),
+            "MeanDirection", StringValue("ns3::UniformRandomVariable[Min=0|Max=6.283185307]"),
+            "MeanPitch", StringValue("ns3::UniformRandomVariable[Min=-0.05|Max=0.05]"),
             "NormalVelocity", StringValue("ns3::NormalRandomVariable[Mean=0.0|Variance=0.0|Bound=0.0]"),
             "NormalDirection", StringValue("ns3::NormalRandomVariable[Mean=0.0|Variance=0.1|Bound=0.2]"),
             "NormalPitch", StringValue("ns3::NormalRandomVariable[Mean=0.0|Variance=0.01|Bound=0.02]"));
+        staMobilityHelper.Install(config.staNodes.Get(i));
         
-        staMobility.Install(config.staNodes.Get(i));
-        
-        NS_LOG_INFO("  STA " << i << " initial position: (" << initX << ", " << initY << ", " << initZ << ")");
+        NS_LOG_INFO("  STA " << i << " initial position near AP node " << apIndex
+                    << " at (" << staPos.x << ", " << staPos.y << ", " << staPos.z << ")");
     }
     
-    NS_LOG_INFO("STA nodes configured with GaussMarkov 3D mobility (0.3-0.8 m/s, 20m x 20m area, 0-30m height)");
-    NS_LOG_INFO("  Movement centered around AP Node " << apNodeIndex << " at (" << apPosition.x << ", " << apPosition.y << ")");
-    
-    // Aggregate building information to STA nodes
     BuildingsHelper::Install(config.staNodes);
     
-    NS_LOG_INFO("Hotspot infrastructure setup complete: AP on Node " << apNodeIndex << 
-                ", " << numStaNodes << " STA clients on 192.168.2.0/24");
+    NS_LOG_INFO("Hotspot infrastructure setup complete: " << meshCount
+                << " AP nodes with " << numStaNodes << " STA clients on 192.168.1.0/24");
     return config;
 }
 
 // ============================================================================
 // Function: Configure IP forwarding on gateway, router, and AP node
 // ============================================================================
-void ConfigureIPForwarding(NodeContainer meshNodes, NodeContainer internetNodes, uint32_t apNodeIndex)
+void ConfigureIPForwarding(NodeContainer meshNodes, NodeContainer internetNodes, uint32_t /*primaryApNodeIndex*/)
 {
     NS_LOG_FUNCTION("Configuring IP forwarding");
     
-    // Enable IP forwarding on node 0 (gateway)
-    Ptr<Ipv4> ipv4Node0 = meshNodes.Get(0)->GetObject<Ipv4>();
-    ipv4Node0->SetAttribute("IpForward", BooleanValue(true));
+    // Enable IP forwarding on all mesh nodes (each may host an AP)
+    for (uint32_t i = 0; i < meshNodes.GetN(); ++i)
+    {
+        Ptr<Ipv4> ipv4Mesh = meshNodes.Get(i)->GetObject<Ipv4>();
+        ipv4Mesh->SetAttribute("IpForward", BooleanValue(true));
+    }
 
     // Enable IP forwarding on ISP router
     Ptr<Ipv4> ipv4Router = internetNodes.Get(0)->GetObject<Ipv4>();
     ipv4Router->SetAttribute("IpForward", BooleanValue(true));
-
-    // Enable IP forwarding on AP node (e.g., Node 8) - acts as router for STA clients
-    Ptr<Ipv4> ipv4ApNode = meshNodes.Get(apNodeIndex)->GetObject<Ipv4>();
-    ipv4ApNode->SetAttribute("IpForward", BooleanValue(true));
     
-    NS_LOG_INFO("IP forwarding enabled on gateway, ISP router, and AP node " << apNodeIndex);
+    NS_LOG_INFO("IP forwarding enabled on all mesh nodes and the ISP router");
 }
 
 // ============================================================================
@@ -570,24 +552,23 @@ void ConfigureStaticRouting(const MeshNetworkConfig& meshConfig,
             Ptr<NetDevice> gatewayCsmaDevice = internetConfig.backhaulDevices.Get(0);
             uint32_t gatewayCsmaInterface = ipv4->GetInterfaceForDevice(gatewayCsmaDevice);
             
-            NS_LOG_INFO("Gateway (Node 0) default route to " << nextHopIp << 
-                       " via interface " << gatewayCsmaInterface);
+            NS_LOG_INFO("Gateway (Node 0) default route to " << nextHopIp 
+                       << " via interface " << gatewayCsmaInterface);
             routing->SetDefaultRoute(nextHopIp, gatewayCsmaInterface);
             
-            // If hotspot enabled, add route to hotspot network via AP node's mesh IP
             if (enableHotspot)
             {
-                Ipv4Address apMeshIp = meshConfig.meshInterfaces.GetAddress(hotspotConfig.apNodeIndex);
                 Ptr<NetDevice> gatewayMeshDevice = meshConfig.meshDevices.Get(0);
                 uint32_t gatewayMeshInterface = ipv4->GetInterfaceForDevice(gatewayMeshDevice);
-                
-                routing->AddNetworkRouteTo(Ipv4Address("192.168.2.0"),
-                                          Ipv4Mask("255.255.255.0"),
-                                          apMeshIp,
-                                          gatewayMeshInterface);
-                
-                NS_LOG_INFO("Gateway (Node 0) route to hotspot network (192.168.2.0/24) via Node " << 
-                           hotspotConfig.apNodeIndex << " mesh IP " << apMeshIp);
+                for (uint32_t staIdx = 0; staIdx < hotspotConfig.staNodes.GetN(); ++staIdx)
+                {
+                    Ipv4Address staIp = hotspotConfig.staInterfaces.GetAddress(staIdx);
+                    uint32_t apNodeIdx = hotspotConfig.staToApIndex[staIdx];
+                    Ipv4Address apMeshIp = meshConfig.meshInterfaces.GetAddress(apNodeIdx);
+                    routing->AddHostRouteTo(staIp, apMeshIp, gatewayMeshInterface);
+                    NS_LOG_INFO("Gateway host route to STA " << staIdx << " (" << staIp
+                                 << ") via mesh node " << apNodeIdx << " IP " << apMeshIp);
+                }
             }
         }
         else
@@ -596,7 +577,6 @@ void ConfigureStaticRouting(const MeshNetworkConfig& meshConfig,
             Ipv4Address gatewayMeshIp = meshConfig.meshInterfaces.GetAddress(0);
             Ptr<NetDevice> nodeMeshDevice = meshConfig.meshDevices.Get(i);
             uint32_t nodeMeshInterface = ipv4->GetInterfaceForDevice(nodeMeshDevice);
-            
             routing->SetDefaultRoute(gatewayMeshIp, nodeMeshInterface);
         }
     }
@@ -614,16 +594,14 @@ void ConfigureStaticRouting(const MeshNetworkConfig& meshConfig,
                                   gatewayBackhaulIp,
                                   ispBackhaulInterface);
     
-    // If hotspot enabled, add route to hotspot network via gateway's backhaul IP
     if (enableHotspot)
     {
-        ispRouting->AddNetworkRouteTo(Ipv4Address("192.168.2.0"),
+        ispRouting->AddNetworkRouteTo(Ipv4Address("192.168.1.0"),
                                       Ipv4Mask("255.255.255.0"),
                                       gatewayBackhaulIp,
                                       ispBackhaulInterface);
-        
-        NS_LOG_INFO("ISP Router route to hotspot network (192.168.2.0/24) via gateway backhaul IP " << 
-                   gatewayBackhaulIp);
+        NS_LOG_INFO("ISP Router route to hotspot network (192.168.1.0/24) via gateway backhaul IP "
+                    << gatewayBackhaulIp);
     }
     
     // --- Configure the Internet Server ---
@@ -644,14 +622,14 @@ void ConfigureStaticRouting(const MeshNetworkConfig& meshConfig,
             Ptr<Ipv4> ipv4Sta = hotspotConfig.staNodes.Get(i)->GetObject<Ipv4>();
             Ptr<Ipv4StaticRouting> staRouting = staticRouting.GetStaticRouting(ipv4Sta);
             
-            // STA default route to AP node's hotspot IP (192.168.2.1)
-            Ipv4Address apHotspotIp = hotspotConfig.hotspotInterfaces.GetAddress(0);
+            uint32_t apNodeIdx = hotspotConfig.staToApIndex[i];
+            Ipv4Address apHotspotIp = hotspotConfig.apInterfaces.GetAddress(apNodeIdx);
             Ptr<NetDevice> staDevice = hotspotConfig.staDevices.Get(i);
             uint32_t staInterface = ipv4Sta->GetInterfaceForDevice(staDevice);
             
             staRouting->SetDefaultRoute(apHotspotIp, staInterface);
-            
-            NS_LOG_INFO("STA " << i << " default route to AP hotspot IP " << apHotspotIp);
+            NS_LOG_INFO("STA " << i << " default route to AP node " << apNodeIdx
+                        << " hotspot IP " << apHotspotIp);
         }
     }
     
@@ -666,64 +644,93 @@ void SetupApplications(const MeshNetworkConfig& meshConfig,
                       const HotspotConfig& hotspotConfig,
                       double simTime,
                       bool enableHotspot,
-                      uint32_t meshClientNodeIndex,
                       uint32_t packetSize)
 {
     NS_LOG_FUNCTION("Setting up applications");
     
-    uint16_t webPort = 80;
-    uint16_t udpPort = 9;
+    const uint16_t httpPort = 80;
+    const uint16_t httpsPort = 443;
+    const uint16_t videoPort = 8080;
+    const uint16_t voipPort = 5060;
+    const uint16_t dnsPort = 53;
     
-    // Set up Internet TCP web server (simulating external server like Google)
-    PacketSinkHelper webServer("ns3::TcpSocketFactory", 
-                               InetSocketAddress(Ipv4Address::GetAny(), webPort));
-    ApplicationContainer webServerApp = webServer.Install(internetConfig.internetNodes.Get(1));
-    webServerApp.Start(Seconds(1.0));
-    webServerApp.Stop(Seconds(simTime));
+    // Install servers on the internet node (remote host analogue)
+    ApplicationContainer serverApps;
+    PacketSinkHelper httpServer("ns3::TcpSocketFactory",
+                                InetSocketAddress(Ipv4Address::GetAny(), httpPort));
+    serverApps.Add(httpServer.Install(internetConfig.internetNodes.Get(1)));
+    PacketSinkHelper httpsServer("ns3::TcpSocketFactory",
+                                 InetSocketAddress(Ipv4Address::GetAny(), httpsPort));
+    serverApps.Add(httpsServer.Install(internetConfig.internetNodes.Get(1)));
+    PacketSinkHelper videoServer("ns3::TcpSocketFactory",
+                                 InetSocketAddress(Ipv4Address::GetAny(), videoPort));
+    serverApps.Add(videoServer.Install(internetConfig.internetNodes.Get(1)));
+    UdpServerHelper voipServer(voipPort);
+    serverApps.Add(voipServer.Install(internetConfig.internetNodes.Get(1)));
+    UdpServerHelper dnsServer(dnsPort);
+    serverApps.Add(dnsServer.Install(internetConfig.internetNodes.Get(1)));
+    serverApps.Start(Seconds(0.5));
+    serverApps.Stop(Seconds(simTime));
     
-    // Set up Internet UDP server
-    PacketSinkHelper udpServer("ns3::UdpSocketFactory", 
-                               InetSocketAddress(Ipv4Address::GetAny(), udpPort));
-    ApplicationContainer udpServerApp = udpServer.Install(internetConfig.internetNodes.Get(1));
-    udpServerApp.Start(Seconds(1.0));
-    udpServerApp.Stop(Seconds(simTime));
-
-    // Set up web client on mesh node to access internet server
-    Address webServerAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), webPort));
-    OnOffHelper webClient("ns3::TcpSocketFactory", webServerAddress);
-    webClient.SetAttribute("PacketSize", UintegerValue(packetSize));
-    webClient.SetAttribute("DataRate", StringValue("1Mbps"));
-    webClient.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=2]"));
-    webClient.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    ApplicationContainer webClientApp = webClient.Install(meshConfig.meshNodes.Get(meshClientNodeIndex));
-    webClientApp.Start(Seconds(5.0));
-    webClientApp.Stop(Seconds(30.0));
-    
-    NS_LOG_INFO("Applications configured: Server on internet node, Client on mesh node " << meshClientNodeIndex);
-    
-    // Set up web clients on STA nodes (if hotspot enabled)
-    // Pattern: TCP ONLY (UDP disabled due to OnTime < transmission time for 1MB packets)
-    if (enableHotspot)
+    if (!enableHotspot)
     {
-        for (uint32_t i = 0; i < hotspotConfig.staNodes.GetN(); i++)
-        {
-            double startTime = 6.0 + i * 0.5;  // Stagger start times by 0.5s
-            
-            // TCP client for all STA nodes
-            OnOffHelper staWebClient("ns3::TcpSocketFactory", webServerAddress);
-            staWebClient.SetAttribute("PacketSize", UintegerValue(packetSize));
-            staWebClient.SetAttribute("DataRate", StringValue("1Mbps"));
-            staWebClient.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=2]"));
-            staWebClient.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-            
-            ApplicationContainer staClientApp = staWebClient.Install(hotspotConfig.staNodes.Get(i));
-            staClientApp.Start(Seconds(startTime));
-            staClientApp.Stop(Seconds(30.0));
-            
-            NS_LOG_INFO("STA " << i << " (TCP) web client configured to access internet server via AP Node " << 
-                       hotspotConfig.apNodeIndex << " at " << startTime << "s");
-        }
+        return;
     }
+    
+    const uint32_t smallTransferBytes = 10 * 1024;   // 10 KB
+    const uint32_t largeTransferBytes = 1 * 1024 * 1024; // 1 MB
+
+    Address remoteHttpAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), httpPort));
+    Address remoteHttpsAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), httpsPort));
+    Address remoteVideoAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), videoPort));
+    Address remoteVoipAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), voipPort));
+    
+    ApplicationContainer clientApps;
+    uint32_t staCount = hotspotConfig.staNodes.GetN();
+    
+    auto installTcpBulk = [&](uint32_t staIndex, Address remote, uint32_t maxBytes, double offset) {
+        if (staIndex >= staCount)
+        {
+            return;
+        }
+        BulkSendHelper bulk("ns3::TcpSocketFactory", remote);
+        bulk.SetAttribute("MaxBytes", UintegerValue(maxBytes));
+        bulk.SetAttribute("SendSize", UintegerValue(packetSize));
+        ApplicationContainer app = bulk.Install(hotspotConfig.staNodes.Get(staIndex));
+        app.Start(Seconds(5.0 + offset));
+        app.Stop(Seconds(9.0));
+        clientApps.Add(app);
+    };
+    
+    auto installUdpVoip = [&](uint32_t staIndex, double offset, uint32_t maxBytes) {
+        if (staIndex >= staCount)
+        {
+            return;
+        }
+        OnOffHelper voipClient("ns3::UdpSocketFactory", remoteVoipAddress);
+        voipClient.SetAttribute("DataRate", DataRateValue(DataRate("1.5Mbps")));
+        voipClient.SetAttribute("PacketSize", UintegerValue(packetSize));
+        voipClient.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
+        voipClient.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
+        voipClient.SetAttribute("MaxBytes", UintegerValue(maxBytes));
+        ApplicationContainer app = voipClient.Install(hotspotConfig.staNodes.Get(staIndex));
+        app.Start(Seconds(5.0 + offset));
+        app.Stop(Seconds(9.0));
+        clientApps.Add(app);
+    };
+    
+    installTcpBulk(0, remoteHttpAddress, smallTransferBytes, 0.0);
+    installTcpBulk(1, remoteHttpAddress, smallTransferBytes, 0.1);
+    installTcpBulk(2, remoteHttpsAddress, largeTransferBytes, 0.2);
+    installTcpBulk(3, remoteHttpsAddress, largeTransferBytes, 0.3);
+    installTcpBulk(4, remoteVideoAddress, largeTransferBytes, 0.4);
+    installTcpBulk(5, remoteVideoAddress, largeTransferBytes, 0.5);
+    installTcpBulk(6, remoteHttpAddress, smallTransferBytes, 0.6);
+    installUdpVoip(7, 0.7, smallTransferBytes);
+    installTcpBulk(8, remoteHttpAddress, smallTransferBytes, 0.8);
+    installTcpBulk(9, remoteHttpAddress, largeTransferBytes, 0.9);
+    
+    NS_LOG_INFO("Traffic profile aligned with NR/LTE playfield: HTTP/HTTPS/Video/VoIP/Mixed with 1400-byte segments");
 }
 
 // ============================================================================
@@ -751,8 +758,7 @@ void DisplaySimulationInfo(uint32_t nNodes,
                           double simTime,
                           bool enableHotspot,
                           uint32_t apNodeIndex,
-                          uint32_t numStaNodes,
-                          uint32_t meshClientNodeIndex)
+                          uint32_t numStaNodes)
 {
     NS_LOG_UNCOND("=======================================================================");
     NS_LOG_UNCOND("Starting HWMP Mesh Simulation with Internet Gateway and Hotspot:");
@@ -761,17 +767,15 @@ void DisplaySimulationInfo(uint32_t nNodes,
     NS_LOG_UNCOND("  Mesh Network: 10.1.1.0/24");
     NS_LOG_UNCOND("  Gateway: Node 0 -> Internet via 1Gbps Ethernet (192.168.100.1)");
     NS_LOG_UNCOND("  Internet Server: 8.8.8.2 (simulated external server)");
-    NS_LOG_UNCOND("  Mesh Traffic: Node " << meshClientNodeIndex << " -> Server 8.8.8.2 (port 80)");
-    
     if (enableHotspot)
     {
         NS_LOG_UNCOND("-----------------------------------------------------------------------");
         NS_LOG_UNCOND("  Hotspot Enabled:");
-        NS_LOG_UNCOND("    AP Node: Node " << apNodeIndex << " (hybrid mesh + AP)");
-        NS_LOG_UNCOND("    Hotspot Network: 192.168.2.0/24");
-        NS_LOG_UNCOND("    STA Clients: " << numStaNodes);
-        NS_LOG_UNCOND("    STA Mobility: GaussMarkov 3D (0.3-0.8 m/s, 20m x 20m, Z: 0-30m)");
-        NS_LOG_UNCOND("    STA Traffic: STA -> Server 8.8.8.2 via AP -> Mesh -> Gateway");
+        NS_LOG_UNCOND("    AP Nodes: 0-" << (nNodes - 1) << ");");
+        NS_LOG_UNCOND("    Hotspot Network: 192.168.1.0/24");
+        NS_LOG_UNCOND("    STA Clients: " << numStaNodes << " (one per mesh node, Node " << apNodeIndex << " hosts two)");
+        NS_LOG_UNCOND("    STA Mobility: GaussMarkov 3D (0.3-0.8 m/s, 400m x 400m, Z: 0-30m)");
+        NS_LOG_UNCOND("    STA Traffic: STA -> Server 8.8.8.2 via local AP -> Mesh -> Gateway");
     }
     else
     {
@@ -902,7 +906,7 @@ void SaveConfigurationJSON(uint32_t nNodes, uint32_t gridWidth, uint32_t numStaN
     json << "    \"config_id\": " << meshConfig << "\n";
     json << "  },\n";
     json << "  \"ip_configuration\": {\n";
-    json << "    \"source_ip\": \"192.168.2.2\",\n";
+    json << "    \"source_ip\": \"192.168.1.2\",\n";
     json << "    \"destination_ip\": \"8.8.8.2\"\n";
     json << "  },\n";
     json << "  \"port_information\": {\n";
@@ -938,24 +942,31 @@ void SaveConfigurationJSON(uint32_t nNodes, uint32_t gridWidth, uint32_t numStaN
 int main(int argc, char* argv[])
 {
     // Enable packet metadata for NetAnim
+    PacketMetadata::Enable();
     Packet::EnablePrinting();
-    Packet::EnableChecking();
+
+    RngSeedManager::SetSeed(1);
+
+    Config::SetDefault("ns3::TcpSocket::SndBufSize", UintegerValue(10 * 1024 * 1024));
+    Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue(10 * 1024 * 1024));
+    Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue(1400));
+    Config::SetDefault("ns3::TcpSocket::InitialCwnd", UintegerValue(10));
 
     // ========================================================================
     // STEP 1: Parse Configuration Parameters
     // ========================================================================
     uint32_t nNodes = 9;           // Number of nodes (3x3 grid)
     uint32_t gridWidth = 3;        // Grid width
-    uint32_t packetSize = 1024;    // Packet size in bytes
+    uint32_t packetSize = 1400;    // Packet size in bytes
     uint32_t maxPackets = 100;     // Maximum number of packets
     double interval = 1.0;         // Interval between packets (seconds)
     double nodeSpacing = 250.0;    // Distance between nodes (meters) - OPTIMAL for HybridBuildings
-    uint32_t tcpPacketSize = 1024; // TCP packet size in bytes
+    uint32_t tcpPacketSize = 1400; // TCP packet size in bytes
     double tcpInterval = 5.0;      // TCP interval between packets (seconds)
-    double simTime = 35.0;         // Simulation time (seconds)
+    double simTime = 10.0;         // Simulation time (seconds)
     bool enableHotspot = true;     // Enable hotspot (AP + STA) feature
     uint32_t apNodeIndex = 8;      // Which mesh node acts as AP
-    uint32_t numStaNodes = 2;      // Number of STA clients (all TCP)
+    uint32_t numStaNodes = 10;     // Number of STA clients (all TCP)
     double meshApHeight = 1.5;     // Mesh AP height (meters) - for height optimization tests
     double staHeight = 5.0;        // STA node height (meters) - for vertical spacing tests
     uint32_t meshConfig = 0;       // Mesh AP device configuration (0=default, 1=TP-Link, 2=Orbi, 3=ZenWiFi)
@@ -1011,9 +1022,6 @@ int main(int argc, char* argv[])
     // Update AP node index (last node - bottom-right corner)
     apNodeIndex = nNodes - 1;
     
-    // Update mesh client node index (second to last or node before corner)
-    uint32_t meshClientNodeIndex = nNodes - 2;
-    
     NS_LOG_UNCOND("=======================================================================");
     NS_LOG_UNCOND("Mesh AP Device Configuration:");
     NS_LOG_UNCOND("=======================================================================");
@@ -1036,7 +1044,6 @@ int main(int argc, char* argv[])
     NS_LOG_UNCOND("  Coverage Area: " << actualCoverageX << "m × " << actualCoverageY << "m");
     NS_LOG_UNCOND("  Vertical Range: 0-30m (Buildings at 15m height)");
     NS_LOG_UNCOND("  AP Node: Node " << apNodeIndex << " (bottom-right corner)");
-    NS_LOG_UNCOND("  Mesh Client: Node " << meshClientNodeIndex);
     NS_LOG_UNCOND("=======================================================================\n");
 
     // ========================================================================
@@ -1076,7 +1083,7 @@ int main(int argc, char* argv[])
     // ========================================================================
     // STEP 7: Set Up Applications
     // ========================================================================
-    SetupApplications(meshNetConfig, internetConfig, hotspotConfig, simTime, enableHotspot, meshClientNodeIndex, packetSize);
+    SetupApplications(meshNetConfig, internetConfig, hotspotConfig, simTime, enableHotspot, packetSize);
 
     // ========================================================================
     // STEP 8: Configure NetAnim and FlowMonitor
@@ -1090,7 +1097,7 @@ int main(int argc, char* argv[])
     // ========================================================================
     // STEP 9: Display Info and Run Simulation
     // ========================================================================
-    DisplaySimulationInfo(nNodes, gridWidth, simTime, enableHotspot, apNodeIndex, numStaNodes, meshClientNodeIndex);
+    DisplaySimulationInfo(nNodes, gridWidth, simTime, enableHotspot, apNodeIndex, numStaNodes);
     
     // Save configuration JSON for analysis scripts
     SaveConfigurationJSON(nNodes, gridWidth, numStaNodes, packetSize, nodeSpacing, meshConfig);
@@ -1103,6 +1110,19 @@ int main(int argc, char* argv[])
     // ========================================================================
     SaveFlowMonitorResults(monitor, flowmon);
     Simulator::Destroy();
+
+    std::ostringstream parseCmd;
+    parseCmd << "cd /home/sayed/pic_lab_project/ns3_project_for_kit && "
+             << "python3 wifi_test_research/parse_flowmon_xml.py"
+             << " --sim-time=" << simTime
+             << " --md wifi_test_research/wifi-test-2-adhoc-grid-metrics.md";
+
+    std::cout << "Running FlowMonitor parser..." << std::endl;
+    int parseStatus = std::system(parseCmd.str().c_str());
+    if (parseStatus != 0)
+    {
+        std::cerr << "FlowMonitor parser exited with status " << parseStatus << std::endl;
+    }
 
     return 0;
 }
