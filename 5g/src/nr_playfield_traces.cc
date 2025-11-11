@@ -171,8 +171,8 @@ main(int argc, char** argv)
 
     std::cout << "Simulation Parameters:" << std::endl;
     std::cout << "  Number of UEs: " << nUes << std::endl;
-    std::cout << "  Field size: " << field << "m × " << field << "m" << std::endl;
-    std::cout << "  Height range: " << minHeight << "m - " << maxHeight << "m" << std::endl;
+    std::cout << "  Stage size (L×B×H): " << field << "m × " << field << "m × " << maxHeight << "m" << std::endl;
+    std::cout << "  Ground elevation range: " << minHeight << "m - " << maxHeight << "m" << std::endl;
     std::cout << "  Simulation time: " << simStop << " seconds\n" << std::endl;
 
     // ========================================================================
@@ -348,11 +348,11 @@ main(int argc, char** argv)
 
     // NetAnim for visualization (must stay in scope for entire simulation)
     AnimationInterface anim(kOutDir + "/" + kNetAnimFile);
-    anim.SetMaxPktsPerTraceFile(500000);
+    anim.SetMaxPktsPerTraceFile(00000);
     anim.EnablePacketMetadata(true);
     
     // Configure UE colors and descriptions
-    const char* ueLabels[] = {"HTTP", "HTTP", "HTTPS", "HTTPS", "Video", "Video", "VoIP", "VoIP", "FTP", "Mixed"};
+    const char* ueLabels[] = {"HTTP", "HTTP", "HTTPS", "HTTPS", "Video", "Video", "VoIP", "VoIP", "HTTP", "Mixed"};
     uint8_t ueColors[][3] = {
         {0, 150, 255}, {0, 150, 255}, {0, 200, 150}, {0, 200, 150}, {255, 0, 255},
         {255, 0, 255}, {255, 255, 0}, {255, 255, 0}, {255, 150, 0}, {200, 100, 200}
@@ -402,216 +402,22 @@ main(int argc, char** argv)
     // ========================================================================
     // GENERATE DETAILED REPORT
     // ========================================================================
-    std::cout << "\n=== Generating Detailed Report ===" << std::endl;
-    
-    // Define traffic types for each UE
-    std::map<uint32_t, std::string> ueTrafficType;
-    ueTrafficType[0] = "HTTP (TCP)";
-    ueTrafficType[1] = "HTTP (TCP)";
-    ueTrafficType[2] = "HTTPS (TCP)";
-    ueTrafficType[3] = "HTTPS (TCP)";
-    ueTrafficType[4] = "Video (TCP)";
-    ueTrafficType[5] = "Video (TCP)";
-    ueTrafficType[6] = "VoIP (UDP)";
-    ueTrafficType[7] = "VoIP (UDP)";
-    ueTrafficType[8] = "FTP (TCP)";
-    ueTrafficType[9] = "Mixed (TCP)";
-    
-    // Store metrics for each UE
-    struct UeMetrics {
-        std::string trafficType;
-        uint64_t txPackets = 0;
-        uint64_t rxPackets = 0;
-        uint64_t txBytes = 0;
-        uint64_t rxBytes = 0;
-        double delaySum = 0.0;
-        uint32_t delayCount = 0;
-        double throughput = 0.0;
-        double pdr = 0.0;
-        double avgDelay = 0.0;
-    };
-    
-    std::map<uint32_t, UeMetrics> ueMetrics;
-    
-    // Initialize metrics for all UEs
-    for (uint32_t i = 0; i < nUes; ++i)
-    {
-        ueMetrics[i].trafficType = ueTrafficType[i];
-    }
-    
-    // Get FlowMonitor statistics
-    monitor->CheckForLostPackets();
-    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(fm.GetClassifier());
-    FlowMonitor::FlowStatsContainer stats = monitor->GetFlowStats();
-    
-    // Process each flow
-    for (auto const& flow : stats)
-    {
-        Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(flow.first);
-        
-        // Match flow to UE based on source IP
-        for (uint32_t i = 0; i < nUes; ++i)
-        {
-            Ipv4Address ueAddr = ueIpIfaces.GetAddress(i);
-            if (t.sourceAddress == ueAddr)
-            {
-                ueMetrics[i].txPackets += flow.second.txPackets;
-                ueMetrics[i].rxPackets += flow.second.rxPackets;
-                ueMetrics[i].txBytes += flow.second.txBytes;
-                ueMetrics[i].rxBytes += flow.second.rxBytes;
-                
-                if (flow.second.rxPackets > 0)
-                {
-                    ueMetrics[i].delaySum += flow.second.delaySum.GetSeconds();
-                    ueMetrics[i].delayCount += flow.second.rxPackets;
-                }
-                break;
-            }
-        }
-    }
-    
-    // Calculate final metrics for each UE
-    double effectiveSimTime = simStop - 0.5; // Exclude startup time
-    for (uint32_t i = 0; i < nUes; ++i)
-    {
-        if (ueMetrics[i].txPackets > 0)
-        {
-            ueMetrics[i].pdr = (double)ueMetrics[i].rxPackets / (double)ueMetrics[i].txPackets * 100.0;
-        }
-        
-        if (ueMetrics[i].delayCount > 0)
-        {
-            ueMetrics[i].avgDelay = (ueMetrics[i].delaySum / ueMetrics[i].delayCount) * 1000.0; // Convert to ms
-        }
-        
-        if (ueMetrics[i].rxBytes > 0)
-        {
-            ueMetrics[i].throughput = (ueMetrics[i].rxBytes * 8.0) / effectiveSimTime / 1e6; // Mbps
-        }
-    }
-    
-    // Generate report file
-    std::ofstream reportFile(kOutDir + "/ue_metrics_report.txt");
-    
-    // Console and file output
-    std::string separator = "=================================================================================";
-    std::string line;
-    
-    // Title
-    line = "\n5G NR SIMULATION - UE METRICS REPORT";
-    std::cout << line << std::endl;
-    reportFile << line << std::endl;
-    
-    line = "Packet Size: 1400 bytes (realistic MTU) | Total Data >= 1 MB per UE";
-    std::cout << line << std::endl;
-    reportFile << line << std::endl;
-    
-    line = "Simulation Time: " + std::to_string(simStop) + " seconds";
-    std::cout << line << std::endl;
-    reportFile << line << std::endl;
-    
-    std::cout << separator << std::endl;
-    reportFile << separator << std::endl;
-    
-    // Table header
-    std::cout << std::left << std::setw(8) << "UE ID" 
-              << std::setw(18) << "Traffic Type"
-              << std::right << std::setw(12) << "PDR (%)"
-              << std::setw(15) << "Delay (ms)"
-              << std::setw(18) << "Throughput (Mbps)"
-              << std::setw(12) << "TX Pkts"
-              << std::setw(12) << "RX Pkts"
-              << std::setw(15) << "RX Bytes" << std::endl;
-    
-    reportFile << std::left << std::setw(8) << "UE ID" 
-               << std::setw(18) << "Traffic Type"
-               << std::right << std::setw(12) << "PDR (%)"
-               << std::setw(15) << "Delay (ms)"
-               << std::setw(18) << "Throughput (Mbps)"
-               << std::setw(12) << "TX Pkts"
-               << std::setw(12) << "RX Pkts"
-               << std::setw(15) << "RX Bytes" << std::endl;
-    
-    std::cout << separator << std::endl;
-    reportFile << separator << std::endl;
-    
-    // Table data
-    for (uint32_t i = 0; i < nUes; ++i)
-    {
-        std::cout << std::left << std::setw(8) << i
-                  << std::setw(18) << ueMetrics[i].trafficType
-                  << std::right << std::fixed << std::setprecision(2)
-                  << std::setw(12) << ueMetrics[i].pdr
-                  << std::setw(15) << ueMetrics[i].avgDelay
-                  << std::setw(18) << ueMetrics[i].throughput
-                  << std::setw(12) << ueMetrics[i].txPackets
-                  << std::setw(12) << ueMetrics[i].rxPackets
-                  << std::setw(15) << ueMetrics[i].rxBytes << std::endl;
-        
-        reportFile << std::left << std::setw(8) << i
-                   << std::setw(18) << ueMetrics[i].trafficType
-                   << std::right << std::fixed << std::setprecision(2)
-                   << std::setw(12) << ueMetrics[i].pdr
-                   << std::setw(15) << ueMetrics[i].avgDelay
-                   << std::setw(18) << ueMetrics[i].throughput
-                   << std::setw(12) << ueMetrics[i].txPackets
-                   << std::setw(12) << ueMetrics[i].rxPackets
-                   << std::setw(15) << ueMetrics[i].rxBytes << std::endl;
-    }
-    
-    std::cout << separator << std::endl;
-    reportFile << separator << std::endl;
-    
-    // Summary statistics
-    double avgPdr = 0.0, avgDelay = 0.0, avgThroughput = 0.0;
-    uint32_t count = 0;
-    
-    for (uint32_t i = 0; i < nUes; ++i)
-    {
-        if (ueMetrics[i].txPackets > 0)
-        {
-            avgPdr += ueMetrics[i].pdr;
-            avgDelay += ueMetrics[i].avgDelay;
-            avgThroughput += ueMetrics[i].throughput;
-            count++;
-        }
-    }
-    
-    if (count > 0)
-    {
-        avgPdr /= count;
-        avgDelay /= count;
-        avgThroughput /= count;
-    }
-    
-    line = "\nSUMMARY STATISTICS:";
-    std::cout << line << std::endl;
-    reportFile << line << std::endl;
-    
-    std::cout << std::fixed << std::setprecision(2);
-    reportFile << std::fixed << std::setprecision(2);
-    
-    line = "Average PDR: " + std::to_string(avgPdr).substr(0, 5) + " %";
-    std::cout << line << std::endl;
-    reportFile << line << std::endl;
-    
-    line = "Average E2E Delay: " + std::to_string(avgDelay).substr(0, 6) + " ms";
-    std::cout << line << std::endl;
-    reportFile << line << std::endl;
-    
-    line = "Average Throughput: " + std::to_string(avgThroughput).substr(0, 6) + " Mbps";
-    std::cout << line << std::endl;
-    reportFile << line << std::endl;
-    
-    std::cout << separator << std::endl;
-    reportFile << separator << std::endl;
-    
-    reportFile.close();
-    
-    std::cout << "\nReport saved to: " << kOutDir << "/ue_metrics_report.txt" << std::endl;
     std::cout << "FlowMonitor XML saved to: " << kOutDir << "/" << kFlowmonFile << std::endl;
     std::cout << "All results saved to: " << kOutDir << "/" << std::endl;
     
+    std::ostringstream parseCmd;
+    parseCmd << "cd /home/sayed/pic_lab_project/ns3_project_for_kit && "
+             << "python3 5g/parse_nr_flowmon.py"
+             << " --sim-time=" << simStop
+             << " --md 5g_outputs/nr-playfield-metrics.md";
+
+    std::cout << "Running FlowMonitor parser..." << std::endl;
+    int parseStatus = std::system(parseCmd.str().c_str());
+    if (parseStatus != 0)
+    {
+        std::cerr << "FlowMonitor parser exited with status " << parseStatus << std::endl;
+    }
+
     Simulator::Destroy();
     return 0;
 }
@@ -836,7 +642,6 @@ SetupInternetApplications(NodeContainer ueNodes,
     const uint16_t httpsPort = 443;
     const uint16_t videoPort = 8080;
     const uint16_t voipPort = 5060;
-    const uint16_t ftpPort = 21;
     const uint16_t dnsPort = 53;
     
     ApplicationContainer serverApps;
@@ -857,10 +662,6 @@ SetupInternetApplications(NodeContainer ueNodes,
     
     UdpServerHelper voipServer(voipPort);
     serverApps.Add(voipServer.Install(remoteHost));
-    
-    PacketSinkHelper ftpServer("ns3::TcpSocketFactory",
-                               InetSocketAddress(Ipv4Address::GetAny(), ftpPort));
-    serverApps.Add(ftpServer.Install(remoteHost));
     
     UdpServerHelper dnsServer(dnsPort);
     serverApps.Add(dnsServer.Install(remoteHost));
@@ -929,15 +730,15 @@ SetupInternetApplications(NodeContainer ueNodes,
         clientApps.Add(voipApp);
     }
     
-    // UE 8: FTP (TCP) - Transfer 2.5 MB total
-    BulkSendHelper ftpClient("ns3::TcpSocketFactory",
-                            InetSocketAddress(remoteHostAddr, ftpPort));
-    ftpClient.SetAttribute("MaxBytes", UintegerValue(2500000));
-    ftpClient.SetAttribute("SendSize", UintegerValue(packetSize));
-    ApplicationContainer ftpApp = ftpClient.Install(ueNodes.Get(8));
-    ftpApp.Start(Seconds(1.8));
-    ftpApp.Stop(Seconds(simStop));
-    clientApps.Add(ftpApp);
+    // UE 8: extra HTTP (TCP) - Transfer 2.5 MB total
+    BulkSendHelper httpExtraClient("ns3::TcpSocketFactory",
+                                   InetSocketAddress(remoteHostAddr, httpPort));
+    httpExtraClient.SetAttribute("MaxBytes", UintegerValue(2500000));
+    httpExtraClient.SetAttribute("SendSize", UintegerValue(packetSize));
+    ApplicationContainer httpExtraApp = httpExtraClient.Install(ueNodes.Get(8));
+    httpExtraApp.Start(Seconds(1.8));
+    httpExtraApp.Stop(Seconds(simStop));
+    clientApps.Add(httpExtraApp);
     
     // UE 9: Mixed (TCP) - Transfer 2 MB total
     BulkSendHelper mixedClient("ns3::TcpSocketFactory",
@@ -949,12 +750,5 @@ SetupInternetApplications(NodeContainer ueNodes,
     mixedApp.Stop(Seconds(simStop));
     clientApps.Add(mixedApp);
     
-    std::cout << "Internet traffic configured (1400 byte packets, >= 1 MB total per UE):" << std::endl;
-    std::cout << "  UE 0-1: HTTP (TCP) - 2 MB total" << std::endl;
-    std::cout << "  UE 2-3: HTTPS (TCP) - 2 MB total" << std::endl;
-    std::cout << "  UE 4-5: Video (TCP) - 3 MB total" << std::endl;
-    std::cout << "  UE 6-7: VoIP (UDP) - ~1.5 MB total" << std::endl;
-    std::cout << "  UE 8:   FTP (TCP) - 2.5 MB total" << std::endl;
-    std::cout << "  UE 9:   Mixed (TCP) - 2 MB total" << std::endl;
-    std::cout << "====================================\n" << std::endl;
+   
 }

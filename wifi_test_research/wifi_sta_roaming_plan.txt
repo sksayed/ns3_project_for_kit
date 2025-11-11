@@ -1,0 +1,57 @@
+Wi-Fi STA roaming alignment plan
+================================
+
+Goal
+----
+Keep the six-node mesh infrastructure but allow every STA to associate with whichever hotspot AP it hears, while also lining up the Wi-Fi STA behaviour with the LTE / NR UE runs so future cross-technology comparisons are apples-to-apples.
+
+
+Key changes to implement
+------------------------
+
+1. Random seed harmonisation
+   - Add `RngSeedManager::SetSeed(<shared-seed>);` (and optionally `SetRun(<run>)`) near the top of each main() in:
+     * `wifi_test_research/six_node_layout/wifi-test-2-adhoc-grid-six.cc`
+     * `pic_lab_project/lte_playfield_traces.cc`
+     * `5g/src/nr_playfield_traces.cc`
+   - Use the same seed/run everywhere so that motion and association decisions are reproducible across Wi-Fi / LTE / NR scenarios.
+
+
+2. Common initial positions
+   - Pick a single list of 10 anchor vectors (the LTE/NR list is already a good candidate) and reuse it for STAs/UEs in all three simulations.
+   - Wi-Fi: replace the per-AP offset logic in `SetupHotspotInfrastructure()` with that common list so STAs start where LTE/NR UEs do.
+   - LTE / NR: already use the shared list; optionally move the constant into a small shared header to avoid duplication.
+
+
+3. Shared Gauss–Markov mobility parameters
+   - Ensure every STA/UE uses identical `GaussMarkovMobilityModel` parameters (bounds 0–400 m, speed 0.3–0.8 m/s, alpha 0.85, identical normal/mean distributions).
+   - In Wi-Fi code expand the bounds from the current ±5 m bubbles to the full field so motion matches LTE/NR.
+
+
+4. Allow STAs to roam between APs automatically
+   - Configure every mesh hotspot AP with the same SSID, e.g.
+       `Ssid commonSsid("MeshHotspot");`
+   - Install STA MACs with the same SSID and leave `ActiveProbing = true`.
+   - Remove or ignore the `staToApIndex` mapping; the STA will discover and attach to the AP it hears (and will re-associate if a stronger AP appears as it moves).
+
+
+5. Optional logging / observability
+   - Add console logs when an STA associates or re-associates (subscribe to the Wi-Fi MAC association trace source) for debugging.
+   - Verify with FlowMonitor outputs, NetAnim, or ASCII traces that STA traffic actually shifts to the expected AP.
+
+
+Verification steps
+------------------
+1. Rebuild the project (`./ns3 build`).
+2. Run the Wi-Fi six-node scenario with each meshConfig to confirm STAs no longer follow hard-coded AP mappings.
+3. Run LTE and NR scenarios with the same seed; ensure initial positions/motion match Wi-Fi (spot-check via NetAnim or mobility logs).
+4. Compare FlowMonitor reports across technologies; PDR/latency profiles should now reflect consistent UE geometry/movement.
+
+
+Future enhancements (optional)
+------------------------------
+* Extract the common position list and mobility helper into a shared utility header to avoid copy/paste.
+* Introduce automated tests that assert STA attachment patterns (e.g., nearest AP as expected) when mobility carries them across cell borders.
+* Parameterise the common SSID / seed via command-line arguments for flexibility across experiments.
+
+

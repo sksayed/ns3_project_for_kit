@@ -12,3 +12,17 @@ build_example(
     ${libcsma}
 )
 
+build_example(
+  NAME wifi-test-2-adhoc-grid-six
+  SOURCE_FILES six_node_layout/wifi-test-2-adhoc-grid-six.cc
+  LIBRARIES_TO_LINK
+    ${libinternet}
+    ${libwifi}
+    ${libmesh}
+    ${libapplications}
+    ${libnetanim}
+    ${libflow-monitor}
+    ${libbuildings}
+    ${libcsma}
+)
+
