@@ -31,14 +31,24 @@
 #include "ns3/nr-point-to-point-epc-helper.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/ideal-beamforming-algorithm.h"
+#include "ns3/isotropic-antenna-model.h"
+#include "ns3/pointer.h"
+#include "ns3/random-variable-stream.h"
+#include "ns3/rng-seed-manager.h"
+#include "ns3/hybrid-buildings-propagation-loss-model.h"
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <vector>
+#include <map>
+#include <array>
+#include <filesystem>
 
 using namespace ns3;
+namespace fs = std::filesystem;
 
 static const std::string kOutDir = "5g_outputs";
 
@@ -47,7 +57,11 @@ static const std::string kOutDir = "5g_outputs";
 // ============================================================================
 
 // Mobility configuration
-void ConfigureUeMobility(NodeContainer& ueNodes, double field, double minHeight, double maxHeight);
+void ConfigureUeMobility(NodeContainer& ueNodes,
+                         double field,
+                         double minHeight,
+                         double maxHeight,
+                         bool useAnchorPositions);
 void ConfigureGnbMobility(NodeContainer& gnbNodes, double field);
 
 // Network infrastructure
@@ -64,7 +78,14 @@ void AttachUesToGnbs(Ptr<NrHelper> nrHelper,
 void SetupInternetApplications(NodeContainer ueNodes,
                               Ptr<Node> remoteHost,
                               Ipv4InterfaceContainer ueIpIfaces,
-                              double simStop);
+                              double simStop,
+                              uint32_t packetSize,
+                              uint32_t httpBytes,
+                              uint32_t httpsBytes,
+                              uint32_t videoBytes,
+                              uint32_t voipBytes,
+                              uint32_t mixedBytes,
+                              uint32_t extraHttpBytes);
 
 // ============================================================================
 // RRC trace callbacks for better runtime visibility
@@ -151,6 +172,37 @@ main(int argc, char** argv)
     // ========================================================================
     // INITIALIZATION
     // ========================================================================
+    bool useAnchorPositions = false;
+    uint32_t nUes = 10;
+    uint32_t rngSeed = 1;
+    uint32_t packetSize = 1400;
+    uint32_t httpBytes = 2 * 1024 * 1024;
+    uint32_t httpsBytes = 2 * 1024 * 1024;
+    uint32_t videoBytes = 3 * 1024 * 1024;
+    uint32_t voipBytes = 1 * 1024 * 1024;
+    uint32_t mixedBytes = 2 * 1024 * 1024;
+    uint32_t extraHttpBytes = 2500000;
+    std::string outputDir = kOutDir;
+
+    CommandLine cmd(__FILE__);
+    cmd.AddValue("useAnchorPositions",
+                 "Use predefined anchor layout for UE initial positions instead of uniform random.",
+                 useAnchorPositions);
+    cmd.AddValue("nUes", "Number of UE nodes to create", nUes);
+    cmd.AddValue("rngSeed", "RNG seed for reproducible runs", rngSeed);
+    cmd.AddValue("packetSize", "Application packet size in bytes for TCP/UDP flows", packetSize);
+    cmd.AddValue("httpBytes", "Total bytes for each HTTP BulkSend flow", httpBytes);
+    cmd.AddValue("httpsBytes", "Total bytes for each HTTPS BulkSend flow", httpsBytes);
+    cmd.AddValue("videoBytes", "Total bytes for each video BulkSend flow", videoBytes);
+    cmd.AddValue("voipBytes", "Total bytes for each VoIP OnOff flow", voipBytes);
+    cmd.AddValue("mixedBytes", "Total bytes for each mixed BulkSend flow", mixedBytes);
+    cmd.AddValue("extraHttpBytes", "Total bytes for the additional HTTP BulkSend flow", extraHttpBytes);
+    cmd.AddValue("outputDir", "Directory where run artifacts (XML/metrics) are stored", outputDir);
+    cmd.Parse(argc, argv);
+
+    RngSeedManager::SetSeed(rngSeed);
+    fs::create_directories(fs::path(outputDir));
+
     PacketMetadata::Enable();
     Packet::EnablePrinting();
     // LogComponentEnable("UdpServer", LOG_LEVEL_INFO); // Disabled for performance
@@ -163,9 +215,8 @@ main(int argc, char** argv)
     // ========================================================================
     // SIMULATION PARAMETERS
     // ========================================================================
-    const uint32_t nUes = 10;
     const double field = 400.0;
-    const double simStop = 10.0;  // 10 seconds for faster simulation
+    const double simStop = 30.0;  // Extended to 30 seconds
     const double minHeight = 0.0;
     const double maxHeight = 30.0;
 
@@ -174,6 +225,8 @@ main(int argc, char** argv)
     std::cout << "  Stage size (L×B×H): " << field << "m × " << field << "m × " << maxHeight << "m" << std::endl;
     std::cout << "  Ground elevation range: " << minHeight << "m - " << maxHeight << "m" << std::endl;
     std::cout << "  Simulation time: " << simStop << " seconds\n" << std::endl;
+    std::cout << "  UE initial position mode: "
+              << (useAnchorPositions ? "anchor layout" : "uniform random distribution") << std::endl;
 
     // ========================================================================
     // CREATE NODES
@@ -186,7 +239,7 @@ main(int argc, char** argv)
     // ========================================================================
     // MOBILITY CONFIGURATION
     // ========================================================================
-    ConfigureUeMobility(ueNodes, field, minHeight, maxHeight);
+    ConfigureUeMobility(ueNodes, field, minHeight, maxHeight, useAnchorPositions);
     ConfigureGnbMobility(gnbNodes, field);
 
     // ========================================================================
@@ -201,6 +254,14 @@ main(int argc, char** argv)
     
     // Create NR helper
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+    // Align UE transmit characteristics with Wi-Fi STA profile
+    Config::SetDefault("ns3::NrUePhy::TxPower", DoubleValue(15.0));
+    nrHelper->SetUeAntennaAttribute("NumRows", UintegerValue(1));
+    nrHelper->SetUeAntennaAttribute("NumColumns", UintegerValue(1));
+    Ptr<IsotropicAntennaModel> ueAntenna = CreateObject<IsotropicAntennaModel>();
+    ueAntenna->SetAttribute("Gain", DoubleValue(1.0));
+    nrHelper->SetUeAntennaAttribute("AntennaElement", PointerValue(ueAntenna));
+
     
     // Create EPC helper
     Ptr<NrPointToPointEpcHelper> epcHelper = CreateObject<NrPointToPointEpcHelper>();
@@ -222,12 +283,13 @@ main(int argc, char** argv)
     bandConf.m_numBwp = 1;
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
     
-    // Create channel helper with UMa model
+    // Create channel helper with shared HybridBuildings propagation model
     Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
-    channelHelper->ConfigureFactories("UMa", "Default", "ThreeGpp");
-    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
-    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(true));
-    std::cout << "Channel Model: UMa (Urban Macro) - for macro cell deployment" << std::endl;
+    channelHelper->ConfigureFactories("RMa", "Default", "ThreeGpp");
+    channelHelper->ConfigurePropagationFactory(
+        HybridBuildingsPropagationLossModel::GetTypeId());
+    channelHelper->SetPathlossAttribute("Frequency", DoubleValue(centralFrequency));
+    std::cout << "Channel Model: HybridBuildingsPropagationLossModel" << std::endl;
     
     // Set beamforming method
     idealBeamformingHelper->SetAttribute("BeamformingMethod",
@@ -240,7 +302,7 @@ main(int argc, char** argv)
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(0));
     nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(0));
     
-    std::cout << "Using default TxPower settings: gNB=~43 dBm (macro cell), UE=~23 dBm" << std::endl;
+    std::cout << "Using default TxPower settings: gNB=~43 dBm (macro cell), UE=15 dBm" << std::endl;
     std::cout << "====================================\n" << std::endl;
 
     // ========================================================================
@@ -252,8 +314,8 @@ main(int argc, char** argv)
     
     BuildingsHelper::Install(ueNodes);
     BuildingsHelper::Install(gnbNodes);
-    nrHelper->EnableTraces();
-    std::cout << "NR devices installed and traces enabled" << std::endl;
+    // nrHelper->EnableTraces();
+    // std::cout << "NR devices installed and traces enabled" << std::endl;
     std::cout << "====================================\n" << std::endl;
 
     // ========================================================================
@@ -264,7 +326,7 @@ main(int argc, char** argv)
     // Configure TCP with larger buffer sizes for 1 MB packets
     Config::SetDefault("ns3::TcpSocket::SndBufSize", UintegerValue(10 * 1024 * 1024)); // 10 MB
     Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue(10 * 1024 * 1024)); // 10 MB
-    Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue(1400)); // MTU size
+    Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue(packetSize)); // Align with flow packet size
     Config::SetDefault("ns3::TcpSocket::InitialCwnd", UintegerValue(10));
     
     InternetStackHelper internet;
@@ -277,10 +339,20 @@ main(int argc, char** argv)
     // ========================================================================
     // ATTACH UEs TO gNBs
     // ========================================================================
+    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+    {
+        NS_ABORT_MSG_IF(ueNodes.Get(i)->GetObject<MobilityModel>() == nullptr,
+                        "UE node " << i << " is missing a MobilityModel");
+    }
+    for (uint32_t i = 0; i < gnbNodes.GetN(); ++i)
+    {
+        NS_ABORT_MSG_IF(gnbNodes.Get(i)->GetObject<MobilityModel>() == nullptr,
+                        "gNB node " << i << " is missing a MobilityModel");
+    }
+
     AttachUesToGnbs(nrHelper, ueNodes, gnbNodes, ueDevs, gnbDevs);
 
     // Ensure outputs directory exists
-    std::system(("mkdir -p " + kOutDir).c_str());
 
     // Create Remote Host to hook PGW and generate pcap/ascii on core link
     Ptr<Node> pgw = epcHelper->GetPgwNode();
@@ -325,16 +397,26 @@ main(int argc, char** argv)
 
     
     // ASCII traces still enabled (smaller file size)
-    AsciiTraceHelper ascii;
-    Ptr<OutputStreamWrapper> stream =
-        ascii.CreateFileStream(kOutDir + "/" + kAsciiTracesPrefix + ".tr");
-    p2ph.EnableAsciiAll(stream);
+    // AsciiTraceHelper ascii;
+    // Ptr<OutputStreamWrapper> stream =
+    //     ascii.CreateFileStream(kOutDir + "/" + kAsciiTracesPrefix + ".tr");
+    // p2ph.EnableAsciiAll(stream);
 
 
     // ========================================================================
     // SETUP INTERNET APPLICATIONS
     // ========================================================================
-    SetupInternetApplications(ueNodes, remoteHost, ueIpIfaces, simStop);
+    SetupInternetApplications(ueNodes,
+                              remoteHost,
+                              ueIpIfaces,
+                              simStop,
+                              packetSize,
+                              httpBytes,
+                              httpsBytes,
+                              videoBytes,
+                              voipBytes,
+                              mixedBytes,
+                              extraHttpBytes);
 
     // ========================================================================
     // MONITORING AND VISUALIZATION
@@ -346,44 +428,17 @@ main(int argc, char** argv)
     Ptr<FlowMonitor> monitor = fm.InstallAll();
     std::cout << "FlowMonitor installed" << std::endl;
 
-    // NetAnim for visualization (must stay in scope for entire simulation)
-    AnimationInterface anim(kOutDir + "/" + kNetAnimFile);
-    anim.SetMaxPktsPerTraceFile(00000);
-    anim.EnablePacketMetadata(true);
+    // // NetAnim for visualization (disabled)
+    // anim.UpdateNodeDescription(sgw, "SGW");
+    // anim.UpdateNodeColor(sgw, 255, 0, 255);
     
-    // Configure UE colors and descriptions
-    const char* ueLabels[] = {"HTTP", "HTTP", "HTTPS", "HTTPS", "Video", "Video", "VoIP", "VoIP", "HTTP", "Mixed"};
-    uint8_t ueColors[][3] = {
-        {0, 150, 255}, {0, 150, 255}, {0, 200, 150}, {0, 200, 150}, {255, 0, 255},
-        {255, 0, 255}, {255, 255, 0}, {255, 255, 0}, {255, 150, 0}, {200, 100, 200}
-    };
-    
-    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
-    {
-        std::string label = "UE" + std::to_string(i) + "-" + ueLabels[i];
-        anim.UpdateNodeDescription(ueNodes.Get(i), label);
-        anim.UpdateNodeColor(ueNodes.Get(i), ueColors[i][0], ueColors[i][1], ueColors[i][2]);
-    }
-    
-    // Configure gNB, server, and EPC nodes
-    anim.UpdateNodeDescription(gnbNodes.Get(0), "gNB-0-West");
-    anim.UpdateNodeColor(gnbNodes.Get(0), 128, 128, 128);
-    anim.UpdateNodeDescription(gnbNodes.Get(1), "gNB-1-East");
-    anim.UpdateNodeColor(gnbNodes.Get(1), 128, 128, 128);
-    anim.UpdateNodeDescription(remoteHost, "Internet-Server");
-    anim.UpdateNodeColor(remoteHost, 0, 255, 0);
-    anim.UpdateNodeDescription(pgw, "PGW");
-    anim.UpdateNodeColor(pgw, 128, 0, 128);
-    anim.UpdateNodeDescription(sgw, "SGW");
-    anim.UpdateNodeColor(sgw, 255, 0, 255);
-    
-    std::cout << "NetAnim configured successfully" << std::endl;
+    // std::cout << "NetAnim configured successfully" << std::endl;
 
-    // IPv4 L3 ASCII tracing
-    AsciiTraceHelper asciiL3;
-    Ptr<OutputStreamWrapper> ipStream = asciiL3.CreateFileStream(kOutDir + "/ipv4-l3.tr");
-    internet.EnableAsciiIpv4All(ipStream);
-    std::cout << "IPv4 L3 traces enabled" << std::endl;
+    // // IPv4 L3 ASCII tracing
+    // AsciiTraceHelper asciiL3;
+    // Ptr<OutputStreamWrapper> ipStream = asciiL3.CreateFileStream(kOutDir + "/ipv4-l3.tr");
+    // internet.EnableAsciiIpv4All(ipStream);
+    // std::cout << "IPv4 L3 traces enabled" << std::endl;
     std::cout << "====================================\n" << std::endl;
 
     // ========================================================================
@@ -397,19 +452,19 @@ main(int argc, char** argv)
     std::cout << "\n*** Simulation completed! ***\n" << std::endl;
     
     // Save FlowMonitor results
-    monitor->SerializeToXmlFile(kOutDir + "/" + kFlowmonFile, true, true);
+    monitor->SerializeToXmlFile(outputDir + "/" + kFlowmonFile, true, true);
     
     // ========================================================================
     // GENERATE DETAILED REPORT
     // ========================================================================
-    std::cout << "FlowMonitor XML saved to: " << kOutDir << "/" << kFlowmonFile << std::endl;
-    std::cout << "All results saved to: " << kOutDir << "/" << std::endl;
+    std::cout << "FlowMonitor XML saved to: " << outputDir << "/" << kFlowmonFile << std::endl;
+    std::cout << "All results saved to: " << outputDir << "/" << std::endl;
     
     std::ostringstream parseCmd;
     parseCmd << "cd /home/sayed/pic_lab_project/ns3_project_for_kit && "
              << "python3 5g/parse_nr_flowmon.py"
              << " --sim-time=" << simStop
-             << " --md 5g_outputs/nr-playfield-metrics.md";
+             << " --md " << outputDir << "/nr-playfield-metrics.md";
 
     std::cout << "Running FlowMonitor parser..." << std::endl;
     int parseStatus = std::system(parseCmd.str().c_str());
@@ -434,7 +489,11 @@ main(int argc, char** argv)
  * @param maxHeight Maximum height for UE movement (meters)
  */
 void
-ConfigureUeMobility(NodeContainer& ueNodes, double field, double minHeight, double maxHeight)
+ConfigureUeMobility(NodeContainer& ueNodes,
+                    double field,
+                    double minHeight,
+                    double maxHeight,
+                    bool useAnchorPositions)
 {
     std::cout << "\n=== Configuring UE Mobility ===" << std::endl;
     
@@ -449,18 +508,55 @@ ConfigureUeMobility(NodeContainer& ueNodes, double field, double minHeight, doub
     // Initial positions: distribute UEs across the field with varying heights
     MobilityHelper staMobility;
     Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
-    
-    posAlloc->Add(Vector(50.0, 50.0, 5.0));
-    posAlloc->Add(Vector(100.0, 80.0, 10.0));
-    posAlloc->Add(Vector(150.0, 120.0, 15.0));
-    posAlloc->Add(Vector(200.0, 180.0, 20.0));
-    posAlloc->Add(Vector(250.0, 220.0, 25.0));
-    posAlloc->Add(Vector(300.0, 280.0, 8.0));
-    posAlloc->Add(Vector(350.0, 320.0, 12.0));
-    posAlloc->Add(Vector(100.0, 300.0, 18.0));
-    posAlloc->Add(Vector(200.0, 100.0, 3.0));
-    posAlloc->Add(Vector(350.0, 350.0, 22.0));
-    
+
+    if (useAnchorPositions)
+    {
+        static const std::vector<Vector> kAnchorPositions = {
+            Vector(170.0, 10.0, 5.0),
+            Vector(120.0, 230.0, 5.0),
+            Vector(90.0, 240.0, 5.0),
+            Vector(285.0, 40.0, 5.0),
+            Vector(80.0, 180.0, 5.0),
+            Vector(135.0, 165.0, 5.0),
+            Vector(320.0, 170.0, 5.0),
+            Vector(310.0, 300.0, 5.0),
+            Vector(170.0, 320.0, 5.0),
+            Vector(420.0, 220.0, 5.0),
+            Vector(180.0, 150.0, 5.0),
+            Vector(150.0, 180.0, 5.0),
+            Vector(120.0, 150.0, 5.0),
+            Vector(330.0, 150.0, 5.0),
+            Vector(300.0, 120.0, 5.0)};
+
+        for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+        {
+            const Vector& anchor = kAnchorPositions[i % kAnchorPositions.size()];
+            posAlloc->Add(anchor);
+        }
+
+        std::cout << "Initial positions: predefined anchor layout (" << kAnchorPositions.size()
+                  << " entries)" << std::endl;
+    }
+    else
+    {
+        Ptr<UniformRandomVariable> xVar = CreateObject<UniformRandomVariable>();
+        Ptr<UniformRandomVariable> yVar = CreateObject<UniformRandomVariable>();
+        Ptr<UniformRandomVariable> zVar = CreateObject<UniformRandomVariable>();
+        xVar->SetAttribute("Min", DoubleValue(minX));
+        xVar->SetAttribute("Max", DoubleValue(maxX));
+        yVar->SetAttribute("Min", DoubleValue(minY));
+        yVar->SetAttribute("Max", DoubleValue(maxY));
+        zVar->SetAttribute("Min", DoubleValue(minZ));
+        zVar->SetAttribute("Max", DoubleValue(maxZ));
+
+        for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+        {
+            posAlloc->Add(Vector(xVar->GetValue(), yVar->GetValue(), zVar->GetValue()));
+        }
+
+        std::cout << "Initial positions: uniform random distribution across field bounds" << std::endl;
+    }
+
     staMobility.SetPositionAllocator(posAlloc);
     staMobility.SetMobilityModel("ns3::GaussMarkovMobilityModel",
         "Bounds", BoxValue(Box(minX, maxX, minY, maxY, minZ, maxZ)),
@@ -478,7 +574,7 @@ ConfigureUeMobility(NodeContainer& ueNodes, double field, double minHeight, doub
     std::cout << "Movement Type: Smooth, correlated pedestrian movement" << std::endl;
     std::cout << "Speed Range: 0.3 - 0.8 m/s (slow walking)" << std::endl;
     std::cout << "Alpha: 0.85 (high memory, smooth trajectories)" << std::endl;
-    std::cout << "Bounds: (" << minX << "," << maxX << ") × (" << minY << "," << maxY << ") × (" 
+    std::cout << "Bounds: (" << minX << "," << maxX << ") × (" << minY << "," << maxY << ") × ("
               << minZ << "," << maxZ << ")" << std::endl;
     std::cout << "====================================\n" << std::endl;
 }
@@ -556,11 +652,11 @@ CreateBuildingObstacles(double field)
     buildings.Add(rightAbove);
     
     Ptr<Building> cluster250a = CreateObject<Building>();
-    cluster250a->SetBoundaries(Box(80.0, 140.0, 220.0, 228.0, 0.0, 15.0));
+    cluster250a->SetBoundaries(Box(80.0, 140.0, 300.0, 308.0, 0.0, 15.0));
     buildings.Add(cluster250a);
     
     Ptr<Building> cluster250b = CreateObject<Building>();
-    cluster250b->SetBoundaries(Box(170.0, 250.0, 220.0, 228.0, 0.0, 12.0));
+    cluster250b->SetBoundaries(Box(170.0, 250.0, 300.0, 308.0, 0.0, 12.0));
     buildings.Add(cluster250b);
     
     Ptr<Building> cluster50 = CreateObject<Building>();
@@ -594,6 +690,7 @@ AttachUesToGnbs(Ptr<NrHelper> nrHelper,
     for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
     {
         Ptr<MobilityModel> ueMob = ueNodes.Get(i)->GetObject<MobilityModel>();
+        NS_ABORT_MSG_IF(ueMob == nullptr, "AttachUesToGnbs: UE " << i << " missing MobilityModel");
         Vector uePos = ueMob->GetPosition();
         double bestDist = std::numeric_limits<double>::max();
         uint32_t bestGnbIdx = 0;
@@ -601,6 +698,7 @@ AttachUesToGnbs(Ptr<NrHelper> nrHelper,
         for (uint32_t e = 0; e < gnbNodes.GetN(); ++e)
         {
             Ptr<MobilityModel> em = gnbNodes.Get(e)->GetObject<MobilityModel>();
+            NS_ABORT_MSG_IF(em == nullptr, "AttachUesToGnbs: gNB " << e << " missing MobilityModel");
             Vector ep = em->GetPosition();
             double dx = uePos.x - ep.x;
             double dy = uePos.y - ep.y;
@@ -628,16 +726,22 @@ AttachUesToGnbs(Ptr<NrHelper> nrHelper,
  */
 void
 SetupInternetApplications(NodeContainer ueNodes,
-                         Ptr<Node> remoteHost,
-                         Ipv4InterfaceContainer ueIpIfaces,
-                         double simStop)
+                              Ptr<Node> remoteHost,
+                              Ipv4InterfaceContainer ueIpIfaces,
+                              double simStop,
+                              uint32_t packetSize,
+                              uint32_t httpBytes,
+                              uint32_t httpsBytes,
+                              uint32_t videoBytes,
+                              uint32_t voipBytes,
+                              uint32_t mixedBytes,
+                              uint32_t extraHttpBytes)
 {
     std::cout << "\n=== Setting Up Internet Applications ===" << std::endl;
     
     Ipv4Address remoteHostAddr = remoteHost->GetObject<Ipv4>()->GetAddress(1, 0).GetLocal();
     std::cout << "Remote Host (Internet Server) IP: " << remoteHostAddr << std::endl;
     
-    // Port definitions
     const uint16_t httpPort = 80;
     const uint16_t httpsPort = 443;
     const uint16_t videoPort = 8080;
@@ -647,7 +751,6 @@ SetupInternetApplications(NodeContainer ueNodes,
     ApplicationContainer serverApps;
     ApplicationContainer clientApps;
     
-    // Servers on Remote Host
     PacketSinkHelper httpServer("ns3::TcpSocketFactory",
                                 InetSocketAddress(Ipv4Address::GetAny(), httpPort));
     serverApps.Add(httpServer.Install(remoteHost));
@@ -669,86 +772,97 @@ SetupInternetApplications(NodeContainer ueNodes,
     serverApps.Start(Seconds(0.5));
     serverApps.Stop(Seconds(simStop));
     
-    // Application sends data in realistic packet sizes (1400 bytes = typical MTU)
-    // Each UE will transfer >= 1 MB total data
-    const uint32_t packetSize = 1400; // Realistic MTU size
-    const uint32_t minTransferSize = 2 * 1024 * 1024; // 2 MB total per UE
-    
-    // UE clients - Each UE transfers >= 1 MB of data using realistic packet sizes
-    
-    // UE 0-1: HTTP (TCP) - Transfer 2 MB total
-    for (uint32_t i = 0; i < 2; ++i)
+    enum class FlowType
     {
-        BulkSendHelper httpClient("ns3::TcpSocketFactory",
-                                 InetSocketAddress(remoteHostAddr, httpPort));
-        httpClient.SetAttribute("MaxBytes", UintegerValue(minTransferSize));
-        httpClient.SetAttribute("SendSize", UintegerValue(packetSize));
-        ApplicationContainer httpApp = httpClient.Install(ueNodes.Get(i));
-        httpApp.Start(Seconds(1.0 + i * 0.1));
-        httpApp.Stop(Seconds(simStop));
-        clientApps.Add(httpApp);
-    }
+        Http,
+        Https,
+        Video,
+        Voip,
+        Mixed
+    };
     
-    // UE 2-3: HTTPS (TCP) - Transfer 2 MB total
-    for (uint32_t i = 2; i < 4; ++i)
+    struct FlowPattern
     {
-        BulkSendHelper httpsClient("ns3::TcpSocketFactory",
-                                  InetSocketAddress(remoteHostAddr, httpsPort));
-        httpsClient.SetAttribute("MaxBytes", UintegerValue(minTransferSize));
-        httpsClient.SetAttribute("SendSize", UintegerValue(packetSize));
-        ApplicationContainer httpsApp = httpsClient.Install(ueNodes.Get(i));
-        httpsApp.Start(Seconds(1.2 + (i-2) * 0.1));
-        httpsApp.Stop(Seconds(simStop));
-        clientApps.Add(httpsApp);
-    }
+        FlowType type;
+        uint32_t maxBytes;
+        double startTime;
+    };
     
-    // UE 4-5: Video (TCP) - Transfer 3 MB total (higher bandwidth)
-    for (uint32_t i = 4; i < 6; ++i)
+    const std::vector<FlowPattern> kFlowPattern = {
+        {FlowType::Http,  httpBytes,       10.0},
+        {FlowType::Http,  httpBytes,       10.1},
+        {FlowType::Https, httpsBytes,      10.2},
+        {FlowType::Https, httpsBytes,      10.3},
+        {FlowType::Video, videoBytes,      10.4},
+        {FlowType::Video, videoBytes,      10.5},
+        {FlowType::Voip,  voipBytes,       10.6},
+        {FlowType::Voip,  voipBytes,       10.7},
+        {FlowType::Http,  extraHttpBytes,  10.8},
+        {FlowType::Mixed, mixedBytes,      11.0},
+    };
+    
+    const InetSocketAddress httpAddress(remoteHostAddr, httpPort);
+    const InetSocketAddress httpsAddress(remoteHostAddr, httpsPort);
+    const InetSocketAddress videoAddress(remoteHostAddr, videoPort);
+    const InetSocketAddress voipAddress(remoteHostAddr, voipPort);
+    
+    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
     {
-        BulkSendHelper videoClient("ns3::TcpSocketFactory",
-                                  InetSocketAddress(remoteHostAddr, videoPort));
-        videoClient.SetAttribute("MaxBytes", UintegerValue(3 * 1024 * 1024));
-        videoClient.SetAttribute("SendSize", UintegerValue(packetSize));
-        ApplicationContainer videoApp = videoClient.Install(ueNodes.Get(i));
-        videoApp.Start(Seconds(1.4 + (i-4) * 0.1));
-        videoApp.Stop(Seconds(simStop));
-        clientApps.Add(videoApp);
+        const uint32_t patternIndex = (i + kFlowPattern.size() / 2) % kFlowPattern.size();
+        const FlowPattern& pattern = kFlowPattern[patternIndex];
+        double cycleOffset = static_cast<double>(i / kFlowPattern.size());
+        double startTime = pattern.startTime + cycleOffset;
+        
+        switch (pattern.type)
+        {
+        case FlowType::Http:
+        case FlowType::Mixed:
+        {
+            BulkSendHelper sender("ns3::TcpSocketFactory", videoAddress);
+            sender.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
+            sender.SetAttribute("SendSize", UintegerValue(packetSize));
+            ApplicationContainer app = sender.Install(ueNodes.Get(i));
+            app.Start(Seconds(startTime));
+            app.Stop(Seconds(simStop));
+            clientApps.Add(app);
+            break;
+        }
+        case FlowType::Https:
+        {
+            BulkSendHelper sender("ns3::TcpSocketFactory", videoAddress);
+            sender.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
+            sender.SetAttribute("SendSize", UintegerValue(packetSize));
+            ApplicationContainer app = sender.Install(ueNodes.Get(i));
+            app.Start(Seconds(startTime));
+            app.Stop(Seconds(simStop));
+            clientApps.Add(app);
+            break;
+        }
+        case FlowType::Video:
+        {
+            BulkSendHelper sender("ns3::TcpSocketFactory", videoAddress);
+            sender.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
+            sender.SetAttribute("SendSize", UintegerValue(packetSize));
+            ApplicationContainer app = sender.Install(ueNodes.Get(i));
+            app.Start(Seconds(startTime));
+            app.Stop(Seconds(simStop));
+            clientApps.Add(app);
+            break;
+        }
+        case FlowType::Voip:
+        {
+            OnOffHelper client("ns3::UdpSocketFactory", voipAddress);
+            client.SetAttribute("DataRate", DataRateValue(DataRate("1.5Mbps")));
+            client.SetAttribute("PacketSize", UintegerValue(packetSize));
+            client.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
+            client.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
+            client.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
+            ApplicationContainer app = client.Install(ueNodes.Get(i));
+            app.Start(Seconds(startTime));
+            app.Stop(Seconds(simStop));
+            clientApps.Add(app);
+            break;
+        }
+        }
     }
-    
-    // UE 6-7: VoIP (UDP) - Transfer ~1.5 MB at 1.5 Mbps
-    for (uint32_t i = 6; i < 8; ++i)
-    {
-        OnOffHelper voipClient("ns3::UdpSocketFactory",
-                              InetSocketAddress(remoteHostAddr, voipPort));
-        voipClient.SetAttribute("DataRate", DataRateValue(DataRate("1.5Mbps")));
-        voipClient.SetAttribute("PacketSize", UintegerValue(packetSize));
-        voipClient.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
-        voipClient.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
-        ApplicationContainer voipApp = voipClient.Install(ueNodes.Get(i));
-        voipApp.Start(Seconds(1.6 + (i-6) * 0.1));
-        voipApp.Stop(Seconds(simStop));
-        clientApps.Add(voipApp);
-    }
-    
-    // UE 8: extra HTTP (TCP) - Transfer 2.5 MB total
-    BulkSendHelper httpExtraClient("ns3::TcpSocketFactory",
-                                   InetSocketAddress(remoteHostAddr, httpPort));
-    httpExtraClient.SetAttribute("MaxBytes", UintegerValue(2500000));
-    httpExtraClient.SetAttribute("SendSize", UintegerValue(packetSize));
-    ApplicationContainer httpExtraApp = httpExtraClient.Install(ueNodes.Get(8));
-    httpExtraApp.Start(Seconds(1.8));
-    httpExtraApp.Stop(Seconds(simStop));
-    clientApps.Add(httpExtraApp);
-    
-    // UE 9: Mixed (TCP) - Transfer 2 MB total
-    BulkSendHelper mixedClient("ns3::TcpSocketFactory",
-                              InetSocketAddress(remoteHostAddr, httpPort));
-    mixedClient.SetAttribute("MaxBytes", UintegerValue(minTransferSize));
-    mixedClient.SetAttribute("SendSize", UintegerValue(packetSize));
-    ApplicationContainer mixedApp = mixedClient.Install(ueNodes.Get(9));
-    mixedApp.Start(Seconds(2.0));
-    mixedApp.Stop(Seconds(simStop));
-    clientApps.Add(mixedApp);
-    
-   
 }

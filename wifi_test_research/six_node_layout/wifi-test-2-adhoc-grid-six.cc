@@ -25,11 +25,14 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <limits>
 #include <iostream>
+#include <filesystem>
 
 using namespace ns3;
+namespace fs = std::filesystem;
                                                                     
 NS_LOG_COMPONENT_DEFINE("MeshSimulation");
 
@@ -402,7 +405,12 @@ std::vector<Vector> GetCommonStaAnchorPositions()
         Vector(320.0, 170.0, 5.0),  // AP3 +20m east
         Vector(285.0, 165.0, 5.0),  // AP3 +25m south-west
         Vector(170.0, 320.0, 5.0),  // AP4 +20m east
-        Vector(320.0, 320.0, 5.0)   // AP5 +20m east
+        Vector(320.0, 320.0, 5.0),  // AP5 +20m east
+        Vector(180.0, 150.0, 5.0),  // AP2 +30m east
+        Vector(150.0, 180.0, 5.0),  // AP2 +30m north
+        Vector(120.0, 150.0, 5.0),  // AP2 +30m west
+        Vector(330.0, 150.0, 5.0),  // AP3 +30m east
+        Vector(300.0, 120.0, 5.0)   // AP3 +30m south
     };
 }
 
@@ -431,9 +439,10 @@ MeshNetworkConfig SetupMeshNetwork(uint32_t nNodes, uint32_t gridWidth, double n
     YansWifiChannelHelper wifiChannel;
     wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
     
-    // Use ONLY HybridBuildingsPropagationLossModel (includes distance loss internally)
-    // NO extra arguments - use default parameters
-    wifiChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel");
+    // Use HybridBuildingsPropagationLossModel with explicit parameters to align with LTE/NR
+    wifiChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel",
+                                   "Frequency",
+                                   DoubleValue(2.4e9));
     
     
     
@@ -450,8 +459,8 @@ MeshNetworkConfig SetupMeshNetwork(uint32_t nNodes, uint32_t gridWidth, double n
     NS_LOG_INFO("Antenna Gains - RX: " << deviceCfg.rxGain << " dB, TX: " << deviceCfg.txGain << " dB");
 
     // Enable ASCII tracing *before* installing devices
-    AsciiTraceHelper ascii;
-    config.wifiPhy.EnableAsciiAll(ascii.CreateFileStream("wifi_test_research/six_node_layout/wifi-test-2-adhoc-grid-six.tr"));
+    // AsciiTraceHelper ascii;
+    // config.wifiPhy.EnableAsciiAll(ascii.CreateFileStream("wifi_test_research/six_node_layout/wifi-test-2-adhoc-grid-six.tr"));
 
     MeshHelper mesh;
     mesh = MeshHelper::Default();
@@ -616,12 +625,14 @@ InternetConfig SetupInternetInfrastructure(NodeContainer meshNodes, double nodeS
 // ============================================================================
 // Function: Set up hotspot infrastructure (AP on mesh node + mobile STA clients)
 // ============================================================================
-HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes, 
+HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes,
                                           uint32_t primaryApNodeIndex,
                                           uint32_t numStaNodes,
                                           double nodeSpacing,
                                           double staHeight,
-                                          const MeshAPDeviceConfig& deviceCfg)
+                                          const MeshAPDeviceConfig& deviceCfg,
+                                          bool useAnchorPositions,
+                                          const std::string& hotspotBand)
 {
     NS_LOG_FUNCTION("Setting up hotspot infrastructure with " << numStaNodes << " STA clients");
     NS_LOG_INFO("Using hotspot TX power: " << deviceCfg.hotspotTxPower << " dBm from device config");
@@ -643,12 +654,30 @@ HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes,
     internetStack.Install(config.staNodes);
 
     // Wi-Fi helpers for hotspot radios
+    std::string hotspotBandLower = hotspotBand;
+    std::transform(hotspotBandLower.begin(),
+                   hotspotBandLower.end(),
+                   hotspotBandLower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    bool use5gHotspot = hotspotBandLower != "2g";
+    double hotspotFrequencyHz = use5gHotspot ? 5.18e9 : 2.437e9;
     WifiHelper hotspotWifi;
-    hotspotWifi.SetStandard(WIFI_STANDARD_80211ac);
+    if (use5gHotspot)
+    {
+        hotspotWifi.SetStandard(WIFI_STANDARD_80211ac);
+        NS_LOG_INFO("  Hotspot band: 5 GHz (802.11ac)");
+    }
+    else
+    {
+        hotspotWifi.SetStandard(WIFI_STANDARD_80211n);
+        NS_LOG_INFO("  Hotspot band: 2.4 GHz (802.11n)");
+    }
 
     YansWifiChannelHelper hotspotChannel;
     hotspotChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
-    hotspotChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel");
+    hotspotChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel",
+                                      "Frequency",
+                                      DoubleValue(hotspotFrequencyHz));
 
     Ptr<YansWifiChannel> sharedHotspotChannel = hotspotChannel.Create();
 
@@ -673,9 +702,9 @@ HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes,
     staPhy.Set("RxNoiseFigure", DoubleValue(7.0));
 
     // Optional ASCII tracing
-    AsciiTraceHelper ascii;
-    apPhy.EnableAsciiAll(ascii.CreateFileStream("wifi_test_research/six_node_layout/wifi-test-2-ap-six.tr"));
-    staPhy.EnableAsciiAll(ascii.CreateFileStream("wifi_test_research/six_node_layout/wifi-test-2-sta-six.tr"));
+    // AsciiTraceHelper ascii;
+    // apPhy.EnableAsciiAll(ascii.CreateFileStream("wifi_test_research/six_node_layout/wifi-test-2-ap-six.tr"));
+    // staPhy.EnableAsciiAll(ascii.CreateFileStream("wifi_test_research/six_node_layout/wifi-test-2-sta-six.tr"));
 
     // Install AP devices on every mesh node (shared SSID for roaming)
     for (uint32_t i = 0; i < meshCount; ++i)
@@ -724,11 +753,52 @@ HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes,
     // Configure STA initial positions near their associated APs using anchor list
     const std::vector<Vector> anchorPositions = GetCommonStaAnchorPositions();
 
+    bool useAnchorsWithData = useAnchorPositions && !anchorPositions.empty();
+    if (useAnchorPositions && anchorPositions.empty())
+    {
+        NS_LOG_WARN("Anchor spawn requested but anchor list is empty; falling back to uniform spawn");
+    }
+
+    Ptr<UniformRandomVariable> xDist = CreateObject<UniformRandomVariable>();
+    xDist->SetAttribute("Min", DoubleValue(0.0));
+    xDist->SetAttribute("Max", DoubleValue(400.0));
+
+    Ptr<UniformRandomVariable> yDist = CreateObject<UniformRandomVariable>();
+    yDist->SetAttribute("Min", DoubleValue(0.0));
+    yDist->SetAttribute("Max", DoubleValue(400.0));
+
+    Ptr<UniformRandomVariable> zDist = CreateObject<UniformRandomVariable>();
+    zDist->SetAttribute("Min", DoubleValue(0.0));
+    zDist->SetAttribute("Max", DoubleValue(30.0));
+
+    if (useAnchorsWithData)
+    {
+        NS_LOG_INFO("  STA spawn mode: using predefined anchor positions");
+    }
+    else
+    {
+        NS_LOG_INFO("  STA spawn mode: uniform distribution across 400m x 400m playfield");
+    }
+
+    uint32_t firstStaNodeId = config.staNodes.Get(0)->GetId();
+
     for (uint32_t i = 0; i < numStaNodes; ++i)
     {
-        Vector staPos = anchorPositions.empty()
-                            ? Vector(0.0, 0.0, staHeight > 0.0 ? staHeight : 1.5)
-                            : anchorPositions[i % anchorPositions.size()];
+        Vector staPos;
+
+        if (useAnchorsWithData)
+        {
+            staPos = anchorPositions[i % anchorPositions.size()];
+            if (staHeight > 0.0)
+            {
+                staPos.z = staHeight;
+            }
+        }
+        else
+        {
+            double zValue = staHeight > 0.0 ? staHeight : zDist->GetValue();
+            staPos = Vector(xDist->GetValue(), yDist->GetValue(), zValue);
+        }
 
         // Adjust Z if caller requested a specific STA height
         if (staHeight > 0.0)
@@ -756,10 +826,13 @@ HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes,
         staMobilityHelper.Install(config.staNodes.Get(i));
 
         uint32_t nodeId = config.staNodes.Get(i)->GetId();
-        std::cout << "Anchored STA spawn " << i << " at ("
+        uint32_t logicalStaId = nodeId - firstStaNodeId; // starts at 0 and increments per STA
+        std::string spawnMode = useAnchorsWithData ? "Anchored" : "Uniform";
+        std::cout << spawnMode << " STA spawn " << (logicalStaId + 1) << " at ("
                   << staPos.x << ", " << staPos.y << ", " << staPos.z
                   << ") [nodeId " << nodeId << "]" << std::endl;
-        NS_LOG_INFO("  STA " << i << " (nodeId " << nodeId << ") initial position ("
+        NS_LOG_INFO("  STA " << (logicalStaId + 1) << " (nodeId " << nodeId
+                    << ") initial position ("
                     << staPos.x << ", " << staPos.y << ", " << staPos.z << ")");
     }
 
@@ -881,7 +954,13 @@ void SetupApplications(const MeshNetworkConfig& meshConfig,
                       const HotspotConfig& hotspotConfig,
                       double simTime,
                       bool enableHotspot,
-                      uint32_t packetSize)
+                      uint32_t packetSize,
+                      uint32_t httpBytes,
+                      uint32_t httpsBytes,
+                      uint32_t videoBytes,
+                      uint32_t voipBytes,
+                      uint32_t mixedBytes,
+                      uint32_t extraHttpBytes)
 {
     NS_LOG_FUNCTION("Setting up applications");
     
@@ -914,60 +993,104 @@ void SetupApplications(const MeshNetworkConfig& meshConfig,
         return;
     }
     
-    const uint32_t smallTransferBytes = 1 * 1024 * 1024;   // 1 MB
-    const uint32_t largeTransferBytes = 1 * 1024 * 1024;   // 1 MB
+    enum class FlowType
+    {
+        Http,
+        Https,
+        Video,
+        Voip,
+        Mixed
+    };
 
-    Address remoteHttpAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), httpPort));
-    Address remoteHttpsAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), httpsPort));
-    Address remoteVideoAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), videoPort));
-    Address remoteVoipAddress(InetSocketAddress(internetConfig.internetInterfaces.GetAddress(1), voipPort));
-    
+    struct FlowPattern
+    {
+        FlowType type;
+        uint32_t maxBytes;
+        double startTime;
+    };
+
+    const std::vector<FlowPattern> kFlowPattern = {
+        {FlowType::Http,  httpBytes,       15.0},
+        {FlowType::Http,  httpBytes,       15.2},
+        {FlowType::Https, httpsBytes,      15.4},
+        {FlowType::Https, httpsBytes,      15.6},
+        {FlowType::Video, videoBytes,      15.8},
+        {FlowType::Video, videoBytes,      16.0},
+        {FlowType::Voip,  voipBytes,       16.2},
+        {FlowType::Voip,  voipBytes,       16.4},
+        {FlowType::Http,  extraHttpBytes,  16.6},
+        {FlowType::Mixed, mixedBytes,      16.8},
+    };
+
+    const InetSocketAddress httpAddress(internetConfig.internetInterfaces.GetAddress(1), httpPort);
+    const InetSocketAddress httpsAddress(internetConfig.internetInterfaces.GetAddress(1), httpsPort);
+    const InetSocketAddress videoAddress(internetConfig.internetInterfaces.GetAddress(1), videoPort);
+    const InetSocketAddress voipAddress(internetConfig.internetInterfaces.GetAddress(1), voipPort);
+
     ApplicationContainer clientApps;
-    uint32_t staCount = hotspotConfig.staNodes.GetN();
-    
-    auto installTcpBulk = [&](uint32_t staIndex, Address remote, uint32_t maxBytes, double offset) {
-        if (staIndex >= staCount)
+    const uint32_t staCount = hotspotConfig.staNodes.GetN();
+
+    for (uint32_t i = 0; i < staCount; ++i)
+    {
+        const uint32_t patternIndex = (i + kFlowPattern.size() / 2) % kFlowPattern.size();
+        const FlowPattern& pattern = kFlowPattern[patternIndex];
+        double cycleOffset = static_cast<double>(i / kFlowPattern.size());
+        double startTime = pattern.startTime + cycleOffset;
+
+        switch (pattern.type)
         {
-            return;
-        }
-        BulkSendHelper bulk("ns3::TcpSocketFactory", remote);
-        bulk.SetAttribute("MaxBytes", UintegerValue(maxBytes));
-        bulk.SetAttribute("SendSize", UintegerValue(packetSize));
-        ApplicationContainer app = bulk.Install(hotspotConfig.staNodes.Get(staIndex));
-        app.Start(Seconds(5.0 + offset));
-        app.Stop(Seconds(30.0));
-        clientApps.Add(app);
-    };
-    
-    auto installUdpVoip = [&](uint32_t staIndex, double offset, uint32_t maxBytes) {
-        if (staIndex >= staCount)
+        case FlowType::Http:
+        case FlowType::Mixed:
         {
-            return;
+            BulkSendHelper sender("ns3::TcpSocketFactory", videoAddress);
+            sender.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
+            sender.SetAttribute("SendSize", UintegerValue(packetSize));
+            ApplicationContainer app = sender.Install(hotspotConfig.staNodes.Get(i));
+            app.Start(Seconds(startTime));
+            app.Stop(Seconds(simTime));
+            clientApps.Add(app);
+            break;
         }
-        OnOffHelper voipClient("ns3::UdpSocketFactory", remoteVoipAddress);
-        voipClient.SetAttribute("DataRate", DataRateValue(DataRate("1.5Mbps")));
-        voipClient.SetAttribute("PacketSize", UintegerValue(packetSize));
-        voipClient.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
-        voipClient.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
-        voipClient.SetAttribute("MaxBytes", UintegerValue(maxBytes));
-        ApplicationContainer app = voipClient.Install(hotspotConfig.staNodes.Get(staIndex));
-        app.Start(Seconds(5.0 + offset));
-        app.Stop(Seconds(30.0));
-        clientApps.Add(app);
-    };
-    
-    installTcpBulk(0, remoteHttpAddress, smallTransferBytes, 0.0);
-    installTcpBulk(1, remoteHttpAddress, smallTransferBytes, 0.1);
-    installTcpBulk(2, remoteHttpsAddress, largeTransferBytes, 0.2);
-    installTcpBulk(3, remoteHttpsAddress, largeTransferBytes, 0.3);
-    installTcpBulk(4, remoteVideoAddress, largeTransferBytes, 0.4);
-    installTcpBulk(5, remoteVideoAddress, largeTransferBytes, 0.5);
-    installTcpBulk(6, remoteHttpAddress, smallTransferBytes, 0.6);
-    installUdpVoip(7, 0.7, smallTransferBytes);
-    installTcpBulk(8, remoteHttpAddress, smallTransferBytes, 0.8);
-    installTcpBulk(9, remoteHttpAddress, largeTransferBytes, 0.9);
-    
-    NS_LOG_INFO("Traffic profile aligned with NR/LTE playfield: HTTP/HTTPS/Video/VoIP/Mixed with 1400-byte segments");
+        case FlowType::Https:
+        {
+            BulkSendHelper sender("ns3::TcpSocketFactory", videoAddress);
+            sender.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
+            sender.SetAttribute("SendSize", UintegerValue(packetSize));
+            ApplicationContainer app = sender.Install(hotspotConfig.staNodes.Get(i));
+            app.Start(Seconds(startTime));
+            app.Stop(Seconds(simTime));
+            clientApps.Add(app);
+            break;
+        }
+        case FlowType::Video:
+        {
+            BulkSendHelper sender("ns3::TcpSocketFactory", videoAddress);
+            sender.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
+            sender.SetAttribute("SendSize", UintegerValue(packetSize));
+            ApplicationContainer app = sender.Install(hotspotConfig.staNodes.Get(i));
+            app.Start(Seconds(startTime));
+            app.Stop(Seconds(simTime));
+            clientApps.Add(app);
+            break;
+        }
+        case FlowType::Voip:
+        {
+            OnOffHelper client("ns3::UdpSocketFactory", voipAddress);
+            client.SetAttribute("DataRate", DataRateValue(DataRate("1.5Mbps")));
+            client.SetAttribute("PacketSize", UintegerValue(packetSize));
+            client.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
+            client.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
+            client.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
+            ApplicationContainer app = client.Install(hotspotConfig.staNodes.Get(i));
+            app.Start(Seconds(startTime));
+            app.Stop(Seconds(simTime));
+            clientApps.Add(app);
+            break;
+        }
+        }
+    }
+
+    NS_LOG_INFO("Traffic profile aligned with NR/LTE playfield: identical HTTP/HTTPS/Video/VoIP/Mixed flows and packet sizing");
 }
 
 // ============================================================================
@@ -977,7 +1100,7 @@ void ConfigureNetAnim(AnimationInterface& anim)
 {
     NS_LOG_FUNCTION("Configuring NetAnim");
     
-    anim.SetMaxPktsPerTraceFile(10000000);  // Increase packet limit to 10 million for large grids
+    anim.SetMaxPktsPerTraceFile(1000000);   // Cap NetAnim trace to 1 million packets
     anim.EnablePacketMetadata(true);
     anim.EnableIpv4RouteTracking("wifi_test_research/six_node_layout/wifi-test-2-adhoc-grid-six-routes.xml",
                                  Seconds(0), Seconds(100), Seconds(1));
@@ -1039,14 +1162,16 @@ void DisplaySimulationInfo(uint32_t nNodes,
 // ============================================================================
 // Function: Save FlowMonitor results and print statistics
 // ============================================================================
-void SaveFlowMonitorResults(Ptr<FlowMonitor> monitor, FlowMonitorHelper& flowmon)
+void SaveFlowMonitorResults(Ptr<FlowMonitor> monitor,
+                            FlowMonitorHelper& flowmon,
+                            const std::string& flowmonXmlPath)
 {
     NS_LOG_FUNCTION("Saving FlowMonitor results");
     
     monitor->CheckForLostPackets();
     
     // Save to XML file
-    monitor->SerializeToXmlFile("wifi_test_research/six_node_layout/wifi-test-2-adhoc-grid-six-flowmon.xml", true, true);
+    monitor->SerializeToXmlFile(flowmonXmlPath, true, true);
     
     // Print statistics to console
     Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(
@@ -1198,7 +1323,6 @@ int main(int argc, char* argv[])
 
     Config::SetDefault("ns3::TcpSocket::SndBufSize", UintegerValue(10 * 1024 * 1024));
     Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue(10 * 1024 * 1024));
-    Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue(1400));
     Config::SetDefault("ns3::TcpSocket::InitialCwnd", UintegerValue(10));
 
     // ========================================================================
@@ -1206,19 +1330,29 @@ int main(int argc, char* argv[])
     // ========================================================================
     uint32_t nNodes = 6;           // Number of mesh nodes (custom six-node layout)
     uint32_t gridWidth = 0;        // Grid width (unused for custom layout)
-    uint32_t packetSize = 1400;    // Packet size in bytes
+    const uint32_t kDefaultPacketSize = 1400;
+    uint32_t packetSize = kDefaultPacketSize;    // Packet size in bytes
     uint32_t maxPackets = 100;     // Maximum number of packets
     double interval = 1.0;         // Interval between packets (seconds)
     double nodeSpacing = 150.0;    // Approximate spacing used for fallback positioning (meters)
-    uint32_t tcpPacketSize = 1400; // TCP packet size in bytes
+    uint32_t tcpPacketSize = kDefaultPacketSize; // TCP packet size in bytes (legacy alias for packetSize)
     double tcpInterval = 5.0;      // TCP interval between packets (seconds)
     double simTime = 30.0;         // Simulation time (seconds)
     bool enableHotspot = true;     // Enable hotspot (AP + STA) feature
+    bool staUniformSpawn = true;  // Use uniform distribution for initial STA positions
     uint32_t apNodeIndex = 5;      // Which mesh node acts as AP
     uint32_t numStaNodes = 10;     // Number of STA clients (all TCP)
     double meshApHeight = 1.5;     // Mesh AP height (meters) - for height optimization tests
     double staHeight = 5.0;        // STA node height (meters) - for vertical spacing tests
     uint32_t meshConfig = 1;       // Mesh AP device configuration (0=Default, 1=TP-Link EAP225, 2=Netgear Orbi 960, 3=Asus ZenWiFi XT8)
+    uint32_t httpBytes = 2 * 1024 * 1024;
+    uint32_t httpsBytes = 2 * 1024 * 1024;
+    uint32_t videoBytes = 3 * 1024 * 1024;
+    uint32_t voipBytes = 1 * 1024 * 1024;
+    uint32_t mixedBytes = 2 * 1024 * 1024;
+    uint32_t extraHttpBytes = 2500000;
+    std::string hotspotBand = "5g"; // Hotspot band selector (5g or 2g)
+    std::string outputDir = "wifi_test_research/six_node_layout";
 
     CommandLine cmd;
     cmd.AddValue("nNodes", "Number of mesh nodes", nNodes);
@@ -1231,12 +1365,47 @@ int main(int argc, char* argv[])
     cmd.AddValue("tcpInterval", "TCP interval between packets (seconds)", tcpInterval);
     cmd.AddValue("simTime", "Simulation time (seconds)", simTime);
     cmd.AddValue("enableHotspot", "Enable hotspot (AP + STA) feature", enableHotspot);
+    cmd.AddValue("staUniformSpawn", "Spawn STA nodes with uniform random positions instead of anchors", staUniformSpawn);
     cmd.AddValue("apNodeIndex", "Which mesh node acts as AP (0-5)", apNodeIndex);
     cmd.AddValue("numStaNodes", "Number of STA clients", numStaNodes);
     cmd.AddValue("meshApHeight", "Mesh AP height in meters (1.5, 10, 15)", meshApHeight);
     cmd.AddValue("staHeight", "STA node height in meters (0-30)", staHeight);
     cmd.AddValue("meshConfig", "Mesh AP device (0=Default 802.11g, 1=TP-Link EAP225, 2=Netgear Orbi 960, 3=Asus ZenWiFi XT8)", meshConfig);
+    cmd.AddValue("httpBytes", "Total bytes for each HTTP BulkSend flow", httpBytes);
+    cmd.AddValue("httpsBytes", "Total bytes for each HTTPS BulkSend flow", httpsBytes);
+    cmd.AddValue("videoBytes", "Total bytes for each video BulkSend flow", videoBytes);
+    cmd.AddValue("voipBytes", "Total bytes for each VoIP OnOff flow", voipBytes);
+    cmd.AddValue("mixedBytes", "Total bytes for each mixed BulkSend flow", mixedBytes);
+    cmd.AddValue("extraHttpBytes", "Total bytes for the additional HTTP BulkSend flow", extraHttpBytes);
+    cmd.AddValue("hotspotBand", "Hotspot band for STA AP radios (5g or 2g)", hotspotBand);
+    cmd.AddValue("outputDir", "Directory where run artifacts (metrics, flowmon, config) are stored", outputDir);
     cmd.Parse(argc, argv);
+
+    if (packetSize == kDefaultPacketSize && tcpPacketSize != kDefaultPacketSize)
+    {
+        packetSize = tcpPacketSize;
+    }
+    else
+    {
+        tcpPacketSize = packetSize;
+    }
+
+    Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue(packetSize));
+    
+    std::string hotspotBandNormalized = hotspotBand;
+    std::transform(hotspotBandNormalized.begin(),
+                   hotspotBandNormalized.end(),
+                   hotspotBandNormalized.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (hotspotBandNormalized != "2g" && hotspotBandNormalized != "5g")
+    {
+        NS_LOG_WARN("Invalid hotspotBand value '" << hotspotBand
+                     << "'. Supported values are '5g' or '2g'. Defaulting to 5g.");
+        hotspotBandNormalized = "5g";
+    }
+    hotspotBand = hotspotBandNormalized;
+    
+    fs::create_directories(fs::path(outputDir));
     
     // Validate mesh config
     if (meshConfig > 3) {
@@ -1309,12 +1478,15 @@ int main(int argc, char* argv[])
     HotspotConfig hotspotConfig;
     if (enableHotspot)
     {
-        hotspotConfig = SetupHotspotInfrastructure(meshNetConfig.meshNodes, 
-                                                    apNodeIndex, 
-                                                    numStaNodes, 
+        bool useAnchorPositions = !staUniformSpawn;
+        hotspotConfig = SetupHotspotInfrastructure(meshNetConfig.meshNodes,
+                                                    apNodeIndex,
+                                                    numStaNodes,
                                                     nodeSpacing,
                                                     staHeight,
-                                                    deviceCfg);  // Pass device config for hotspot TX power
+                                                    deviceCfg,
+                                                    useAnchorPositions,
+                                                    hotspotBand);  // Pass device config for hotspot TX power
     }
 
     // ========================================================================
@@ -1335,13 +1507,24 @@ int main(int argc, char* argv[])
     // ========================================================================
     // STEP 7: Set Up Applications
     // ========================================================================
-    SetupApplications(meshNetConfig, internetConfig, hotspotConfig, simTime, enableHotspot, packetSize);
+    SetupApplications(meshNetConfig,
+                      internetConfig,
+                      hotspotConfig,
+                      simTime,
+                      enableHotspot,
+                      packetSize,
+                      httpBytes,
+                      httpsBytes,
+                      videoBytes,
+                      voipBytes,
+                      mixedBytes,
+                      extraHttpBytes);
 
     // ========================================================================
     // STEP 8: Configure NetAnim and FlowMonitor
     // ========================================================================
-    AnimationInterface anim("wifi_test_research/six_node_layout/wifi-test-2-adhoc-grid-six.xml");
-    ConfigureNetAnim(anim);
+    // AnimationInterface anim("wifi_test_research/six_node_layout/wifi-test-2-adhoc-grid-six.xml");
+    // ConfigureNetAnim(anim);
     
     FlowMonitorHelper flowmon;
     Ptr<FlowMonitor> monitor = flowmon.InstallAll();
@@ -1352,7 +1535,7 @@ int main(int argc, char* argv[])
     DisplaySimulationInfo(nNodes, gridWidth, simTime, enableHotspot, apNodeIndex, numStaNodes);
     
     // Save configuration JSON for analysis scripts
-    SaveConfigurationJSON(nNodes, gridWidth, numStaNodes, packetSize, nodeSpacing, meshConfig);
+    SaveConfigurationJSON(nNodes, gridWidth, numStaNodes, packetSize, nodeSpacing, meshConfig, outputDir);
     
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
@@ -1360,7 +1543,8 @@ int main(int argc, char* argv[])
     // ========================================================================
     // STEP 10: Save Results and Cleanup
     // ========================================================================
-    SaveFlowMonitorResults(monitor, flowmon);
+    std::string flowmonXmlPath = outputDir + "/wifi-test-2-adhoc-grid-six-flowmon.xml";
+    SaveFlowMonitorResults(monitor, flowmon, flowmonXmlPath);
 
     if (enableHotspot)
     {
@@ -1403,9 +1587,9 @@ int main(int argc, char* argv[])
     std::ostringstream parseCmd;
     parseCmd << "cd /home/sayed/pic_lab_project/ns3_project_for_kit && "
              << "python3 wifi_test_research/parse_flowmon_xml.py "
-             << "wifi_test_research/six_node_layout/wifi-test-2-adhoc-grid-six-flowmon.xml"
+             << flowmonXmlPath
              << " --sim-time=" << simTime
-             << " --md wifi_test_research/six_node_layout/wifi-test-2-adhoc-grid-six-metrics.md";
+             << " --md " << outputDir << "/wifi-test-2-adhoc-grid-six-metrics.md";
 
     std::cout << "Running FlowMonitor parser..." << std::endl;
     int parseStatus = std::system(parseCmd.str().c_str());

@@ -5,8 +5,8 @@
     "node_spacing_meters": 150
   },
   "traffic_configuration": {
-    "packet_size_bytes": 1400,
-    "num_sta_nodes": 10
+    "packet_size_bytes": 1048576,
+    "num_sta_nodes": 5
   },
   "mesh_configuration": {
     "config_id": 1

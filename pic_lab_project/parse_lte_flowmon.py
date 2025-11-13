@@ -222,7 +222,7 @@ def _print_report(rows: Iterable[dict]) -> None:
             f"{row['protocol']:<12}"
             f"{row['pdr_percent']:>10.2f}"
             f"{row['avg_delay_ms']:>16.2f}"
-            f"{row['throughput_mbps']:>20.2f}"
+            f"{row['throughput_mbps']:>20.4f}"
             f"{row['tx_packets']:>10}"
             f"{row['rx_packets']:>10}"
             f"{row['lost_packets']:>8}"
@@ -241,7 +241,7 @@ def _print_report(rows: Iterable[dict]) -> None:
             f"{'':<12}"
             f"{(total_pdr / counted):>10.2f}"
             f"{(total_delay / counted):>16.2f}"
-            f"{(total_throughput / counted):>20.2f}"
+            f"{(total_throughput / counted):>20.4f}"
             f"{'':>10}"
             f"{'':>10}"
             f"{'':>8}"
@@ -263,7 +263,7 @@ def _write_markdown(rows: Iterable[dict], md_path: Path) -> None:
             md_file.write(
                 f"| {row['ue_id']} | {row['ip']} | {row['protocol']} | "
                 f"{row['pdr_percent']:.2f} | {row['avg_delay_ms']:.2f} | "
-                f"{row['throughput_mbps']:.2f} | {row['tx_packets']} | "
+                f"{row['throughput_mbps']:.4f} | {row['tx_packets']} | "
                 f"{row['rx_packets']} | {row['lost_packets']} |\n"
             )
     print(f"Wrote Markdown report to {md_path}")
