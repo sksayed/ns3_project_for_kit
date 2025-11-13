@@ -237,7 +237,7 @@ main(int argc, char** argv)
     NodeContainer ueNodes;
     ueNodes.Create(nUes);
     NodeContainer gnbNodes;
-    gnbNodes.Create(2);
+    gnbNodes.Create(1);
 
     // ========================================================================
     // MOBILITY CONFIGURATION
@@ -466,6 +466,7 @@ main(int argc, char** argv)
     std::ostringstream parseCmd;
     parseCmd << "cd /home/sayed/pic_lab_project/ns3_project_for_kit && "
              << "python3 5g/parse_nr_flowmon.py"
+             << " --xml " << outputDir << "/" << kFlowmonFile
              << " --sim-time=" << simStop
              << " --md " << outputDir << "/nr-playfield-metrics.md";
 
@@ -594,8 +595,7 @@ ConfigureGnbMobility(NodeContainer& gnbNodes, double field)
     
     MobilityHelper gnbMob;
     Ptr<ListPositionAllocator> gnbPos = CreateObject<ListPositionAllocator>();
-    gnbPos->Add(Vector(-20.0, field * 0.5, 30.0));
-    gnbPos->Add(Vector(field + 20.0, field * 0.5, 30.0));
+    gnbPos->Add(Vector(200.0, 200.0, 30.0));
     gnbMob.SetPositionAllocator(gnbPos);
     gnbMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     gnbMob.Install(gnbNodes);
