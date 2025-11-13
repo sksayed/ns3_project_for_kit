@@ -49,6 +49,7 @@
 #include <map>
 #include <array>
 #include <filesystem>
+#include <algorithm>
 
 using namespace ns3;
 namespace fs = std::filesystem;
@@ -63,8 +64,7 @@ static const std::string kOutDir = "5g_outputs";
 void ConfigureUeMobility(NodeContainer& ueNodes,
                          double field,
                          double minHeight,
-                         double maxHeight,
-                         bool useAnchorPositions);
+                         double maxHeight);
 void ConfigureGnbMobility(NodeContainer& gnbNodes, double field);
 
 // Network infrastructure
@@ -175,22 +175,19 @@ main(int argc, char** argv)
     // ========================================================================
     // INITIALIZATION
     // ========================================================================
-    bool useAnchorPositions = false;
     uint32_t nUes = 10;
     uint32_t rngSeed = 1;
     uint32_t packetSize = 1400;
-    uint32_t httpBytes = 2 * 1024 * 1024;
-    uint32_t httpsBytes = 2 * 1024 * 1024;
+    uint32_t httpBytes = 1 * 1024 * 1024;
+    uint32_t httpsBytes = 1 * 1024 * 1024;
     uint32_t videoBytes = 3 * 1024 * 1024;
     uint32_t voipBytes = 1 * 1024 * 1024;
-    uint32_t mixedBytes = 2 * 1024 * 1024;
-    uint32_t extraHttpBytes = 2500000;
+    uint32_t mixedBytes = 1 * 1024 * 1024;
+    uint32_t extraHttpBytes = 1 * 1024 * 1024;
     std::string outputDir = kOutDir;
+    double flowScale = 1.0;
 
     CommandLine cmd(__FILE__);
-    cmd.AddValue("useAnchorPositions",
-                 "Use predefined anchor layout for UE initial positions instead of uniform random.",
-                 useAnchorPositions);
     cmd.AddValue("nUes", "Number of UE nodes to create", nUes);
     cmd.AddValue("rngSeed", "RNG seed for reproducible runs", rngSeed);
     cmd.AddValue("packetSize", "Application packet size in bytes for TCP/UDP flows", packetSize);
@@ -201,10 +198,23 @@ main(int argc, char** argv)
     cmd.AddValue("mixedBytes", "Total bytes for each mixed BulkSend flow", mixedBytes);
     cmd.AddValue("extraHttpBytes", "Total bytes for the additional HTTP BulkSend flow", extraHttpBytes);
     cmd.AddValue("outputDir", "Directory where run artifacts (XML/metrics) are stored", outputDir);
+    cmd.AddValue("flowScale",
+                 "Multiplier applied to HTTP/HTTPS/Video/VoIP/Mixed/Extra HTTP byte budgets (1=default)",
+                 flowScale);
     cmd.Parse(argc, argv);
 
     RngSeedManager::SetSeed(rngSeed);
     fs::create_directories(fs::path(outputDir));
+
+    auto scaleBytes = [flowScale](uint32_t value) -> uint32_t {
+        return static_cast<uint32_t>(std::max(1.0, std::round(static_cast<double>(value) * flowScale)));
+    };
+    httpBytes = scaleBytes(httpBytes);
+    httpsBytes = scaleBytes(httpsBytes);
+    videoBytes = scaleBytes(videoBytes);
+    voipBytes = scaleBytes(voipBytes);
+    mixedBytes = scaleBytes(mixedBytes);
+    extraHttpBytes = scaleBytes(extraHttpBytes);
 
     PacketMetadata::Enable();
     Packet::EnablePrinting();
@@ -228,8 +238,7 @@ main(int argc, char** argv)
     std::cout << "  Stage size (L×B×H): " << field << "m × " << field << "m × " << maxHeight << "m" << std::endl;
     std::cout << "  Ground elevation range: " << minHeight << "m - " << maxHeight << "m" << std::endl;
     std::cout << "  Simulation time: " << simStop << " seconds\n" << std::endl;
-    std::cout << "  UE initial position mode: "
-              << (useAnchorPositions ? "anchor layout" : "uniform random distribution") << std::endl;
+    std::cout << "  UE initial position mode: uniform random distribution" << std::endl;
 
     // ========================================================================
     // CREATE NODES
@@ -242,7 +251,7 @@ main(int argc, char** argv)
     // ========================================================================
     // MOBILITY CONFIGURATION
     // ========================================================================
-    ConfigureUeMobility(ueNodes, field, minHeight, maxHeight, useAnchorPositions);
+    ConfigureUeMobility(ueNodes, field, minHeight, maxHeight);
     ConfigureGnbMobility(gnbNodes, field);
 
     // ========================================================================
@@ -496,8 +505,7 @@ void
 ConfigureUeMobility(NodeContainer& ueNodes,
                     double field,
                     double minHeight,
-                    double maxHeight,
-                    bool useAnchorPositions)
+                    double maxHeight)
 {
     std::cout << "\n=== Configuring UE Mobility ===" << std::endl;
     
@@ -513,53 +521,22 @@ ConfigureUeMobility(NodeContainer& ueNodes,
     MobilityHelper staMobility;
     Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
 
-    if (useAnchorPositions)
+    Ptr<UniformRandomVariable> xVar = CreateObject<UniformRandomVariable>();
+    Ptr<UniformRandomVariable> yVar = CreateObject<UniformRandomVariable>();
+    Ptr<UniformRandomVariable> zVar = CreateObject<UniformRandomVariable>();
+    xVar->SetAttribute("Min", DoubleValue(minX));
+    xVar->SetAttribute("Max", DoubleValue(maxX));
+    yVar->SetAttribute("Min", DoubleValue(minY));
+    yVar->SetAttribute("Max", DoubleValue(maxY));
+    zVar->SetAttribute("Min", DoubleValue(minZ));
+    zVar->SetAttribute("Max", DoubleValue(maxZ));
+
+    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
     {
-        static const std::vector<Vector> kAnchorPositions = {
-            Vector(130.0, 200.0, 5.0),
-            Vector(120.0, 230.0, 5.0),
-            Vector(90.0, 240.0, 5.0),
-            Vector(270.0, 200.0, 5.0),
-            Vector(300.0, 200.0, 5.0),
-            Vector(135.0, 165.0, 5.0),
-            Vector(320.0, 170.0, 5.0),
-            Vector(310.0, 300.0, 5.0),
-            Vector(170.0, 320.0, 5.0),
-            Vector(420.0, 220.0, 5.0),
-            Vector(180.0, 150.0, 5.0),
-            Vector(150.0, 180.0, 5.0),
-            Vector(120.0, 150.0, 5.0),
-            Vector(330.0, 150.0, 5.0),
-            Vector(300.0, 120.0, 5.0)};
-
-        for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
-        {
-            const Vector& anchor = kAnchorPositions[i % kAnchorPositions.size()];
-            posAlloc->Add(anchor);
-        }
-
-        std::cout << "Initial positions: predefined anchor layout (" << kAnchorPositions.size()
-                  << " entries)" << std::endl;
+        posAlloc->Add(Vector(xVar->GetValue(), yVar->GetValue(), zVar->GetValue()));
     }
-    else
-    {
-        Ptr<UniformRandomVariable> xVar = CreateObject<UniformRandomVariable>();
-        Ptr<UniformRandomVariable> yVar = CreateObject<UniformRandomVariable>();
-        Ptr<UniformRandomVariable> zVar = CreateObject<UniformRandomVariable>();
-        xVar->SetAttribute("Min", DoubleValue(minX));
-        xVar->SetAttribute("Max", DoubleValue(maxX));
-        yVar->SetAttribute("Min", DoubleValue(minY));
-        yVar->SetAttribute("Max", DoubleValue(maxY));
-        zVar->SetAttribute("Min", DoubleValue(minZ));
-        zVar->SetAttribute("Max", DoubleValue(maxZ));
 
-        for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
-        {
-            posAlloc->Add(Vector(xVar->GetValue(), yVar->GetValue(), zVar->GetValue()));
-        }
-
-        std::cout << "Initial positions: uniform random distribution across field bounds" << std::endl;
-    }
+    std::cout << "Initial positions: uniform random distribution across field bounds" << std::endl;
 
     staMobility.SetPositionAllocator(posAlloc);
     staMobility.SetMobilityModel("ns3::GaussMarkovMobilityModel",

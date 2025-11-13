@@ -1,12 +1,12 @@
 {
   "network_topology": {
-    "num_nodes": 6,
+    "num_nodes": 4,
     "grid_width": 0,
     "node_spacing_meters": 150
   },
   "traffic_configuration": {
-    "packet_size_bytes": 1048576,
-    "num_sta_nodes": 5
+    "packet_size_bytes": 1400,
+    "num_sta_nodes": 1
   },
   "mesh_configuration": {
     "config_id": 1

@@ -384,10 +384,7 @@ EnableStaRoamingTracing(MeshNetworkConfig& meshConfig, HotspotConfig& hotspotCon
 std::vector<Vector> GetSixNodeMeshPositions(double meshApHeight)
 {
     return {
-        Vector(100.0, 100.0, meshApHeight),
-        Vector(300.0, 100.0, meshApHeight),
-        Vector(300.0, 300.0, meshApHeight),
-        Vector(100.0, 300.0, meshApHeight)
+        Vector(100.0, 100.0, meshApHeight)
     };
 }
 
@@ -726,8 +723,6 @@ HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes,
     apAddress.SetBase("192.168.1.0", "255.255.255.0", "0.0.0.101");
     config.apInterfaces = apAddress.Assign(config.apDevices);
 
-    // Configure STA initial positions using uniform distribution
-
     Ptr<UniformRandomVariable> xDist = CreateObject<UniformRandomVariable>();
     xDist->SetAttribute("Min", DoubleValue(0.0));
     xDist->SetAttribute("Max", DoubleValue(400.0));
@@ -746,8 +741,10 @@ HotspotConfig SetupHotspotInfrastructure(NodeContainer meshNodes,
 
     for (uint32_t i = 0; i < numStaNodes; ++i)
     {
+        Vector staPos;
+
         double zValue = staHeight > 0.0 ? staHeight : zDist->GetValue();
-        Vector staPos(xDist->GetValue(), yDist->GetValue(), zValue);
+        staPos = Vector(xDist->GetValue(), yDist->GetValue(), zValue);
 
         // Adjust Z if caller requested a specific STA height
         if (staHeight > 0.0)
@@ -1049,7 +1046,14 @@ void DisplaySimulationInfo(uint32_t nNodes,
     {
         NS_LOG_UNCOND("-----------------------------------------------------------------------");
         NS_LOG_UNCOND("  Hotspot Enabled:");
-        NS_LOG_UNCOND("    AP Nodes: 0-" << (nNodes - 1) << ")");
+        if (nNodes == 1)
+        {
+            NS_LOG_UNCOND("    AP Node: 0");
+        }
+        else
+        {
+            NS_LOG_UNCOND("    AP Nodes: 0-" << (nNodes - 1));
+        }
         NS_LOG_UNCOND("    Hotspot Network: 192.168.1.0/24");
     NS_LOG_UNCOND("    STA Clients: " << numStaNodes);
         NS_LOG_UNCOND("    STA Mobility: GaussMarkov 3D (0.3-0.8 m/s, 400m x 400m, Z: 0-30m)");
@@ -1234,8 +1238,8 @@ int main(int argc, char* argv[])
     // ========================================================================
     // STEP 1: Parse Configuration Parameters
     // ========================================================================
-    uint32_t nNodes = 4;           // Number of mesh nodes (four-AP layout)
-    uint32_t gridWidth = 0;        // Grid width (unused for custom layout)
+    uint32_t nNodes = 1;           // Number of mesh nodes (single mesh AP)
+    uint32_t gridWidth = 0;        // Grid width (unused for single-node layout)
     const uint32_t kDefaultPacketSize = 1400;
     uint32_t packetSize = kDefaultPacketSize;    // Packet size in bytes
     uint32_t maxPackets = 100;     // Maximum number of packets
@@ -1245,8 +1249,8 @@ int main(int argc, char* argv[])
     double tcpInterval = 5.0;      // TCP interval between packets (seconds)
     double simTime = 30.0;         // Simulation time (seconds)
     bool enableHotspot = true;     // Enable hotspot (AP + STA) feature
-    uint32_t apNodeIndex = 3;      // Which mesh node acts as AP (0-based)
-    uint32_t numStaNodes = 1;     // Single STA client (was 10)
+    uint32_t apNodeIndex = 0;      // Mesh node acting as AP (0-based)
+    uint32_t numStaNodes = 1;      // Single STA client
     double meshApHeight = 1.5;     // Mesh AP height (meters) - for height optimization tests
     double staHeight = 5.0;        // STA node height (meters) - for vertical spacing tests
     uint32_t meshConfig = 1;       // Mesh AP device configuration (0=Default, 1=TP-Link EAP225, 2=Netgear Orbi 960, 3=Asus ZenWiFi XT8)
@@ -1278,8 +1282,7 @@ int main(int argc, char* argv[])
     cmd.AddValue("voipBytes", "Total bytes for each VoIP OnOff flow", voipBytes);
     cmd.AddValue("hotspotBand", "Hotspot band for STA AP radios (5g or 2g)", hotspotBand);
     cmd.AddValue("outputDir", "Directory where run artifacts (metrics, flowmon, config) are stored", outputDir);
-    cmd.AddValue("flowScale",
-                 "Multiplier applied to upload/download byte budgets (1=1MB default)", flowScale);
+    cmd.AddValue("flowScale", "Multiplier applied to upload/download byte budgets (1=default, 3=3MB, 5=5MB)", flowScale);
     cmd.Parse(argc, argv);
 
     if (packetSize == kDefaultPacketSize && tcpPacketSize != kDefaultPacketSize)
@@ -1293,11 +1296,8 @@ int main(int argc, char* argv[])
 
     Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue(packetSize));
     
-    auto scaleBytes = [flowScale](uint32_t value) -> uint32_t {
-        return static_cast<uint32_t>(std::max(1.0, std::round(static_cast<double>(value) * flowScale)));
-    };
-    uploadBytes = scaleBytes(uploadBytes);
-    downloadBytes = scaleBytes(downloadBytes);
+    uploadBytes = static_cast<uint32_t>(static_cast<double>(uploadBytes) * flowScale);
+    downloadBytes = static_cast<uint32_t>(static_cast<double>(downloadBytes) * flowScale);
 
     std::string hotspotBandNormalized = hotspotBand;
     std::transform(hotspotBandNormalized.begin(),
@@ -1311,7 +1311,7 @@ int main(int argc, char* argv[])
         hotspotBandNormalized = "5g";
     }
     hotspotBand = hotspotBandNormalized;
-    
+
     fs::create_directories(fs::path(outputDir));
     
     // Validate mesh config

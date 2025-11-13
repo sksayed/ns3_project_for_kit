@@ -13,11 +13,62 @@ import argparse
 import csv
 import sys
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 import xml.etree.ElementTree as ET
 
 
 DEFAULT_FLOWMON_PATH = Path("wifi_test_research/wifi-test-2-adhoc-grid-flowmon.xml")
+TRAFFIC_PORT_LABELS = {
+    80: "HTTP",
+    443: "HTTPS",
+    8080: "Video",
+    5060: "VoIP",
+    53: "DNS",
+}
+UPLOAD_PORT_MIN = 51000
+UPLOAD_PORT_MAX = 51999
+DOWNLOAD_PORT_MIN = 50000
+DOWNLOAD_PORT_MAX = 50999
+
+
+def _protocol_name(proto: str | None) -> str:
+    if proto == "6":
+        return "TCP"
+    if proto == "17":
+        return "UDP"
+    if not proto:
+        return "N/A"
+    return proto
+
+
+def _classify_traffic(meta: dict) -> str:
+    try:
+        dst_port = int(meta.get("destinationPort") or 0)
+    except ValueError:
+        dst_port = 0
+    try:
+        src_port = int(meta.get("sourcePort") or 0)
+    except ValueError:
+        src_port = 0
+
+    label = TRAFFIC_PORT_LABELS.get(dst_port)
+
+    if label is None:
+        if DOWNLOAD_PORT_MIN <= dst_port <= DOWNLOAD_PORT_MAX:
+            label = "TCP Download"
+        elif UPLOAD_PORT_MIN <= dst_port <= UPLOAD_PORT_MAX:
+            label = "TCP Upload"
+        elif dst_port != 0:
+            label = f"Port {dst_port}"
+        elif src_port != 0:
+            label = f"Src Port {src_port}"
+        else:
+            label = "Unknown"
+
+    protocol_name = _protocol_name(meta.get("protocol"))
+    if protocol_name != "N/A":
+        return f"{label} ({protocol_name})"
+    return label
 
 
 def _extract_numeric(value: str | None) -> float:
@@ -123,6 +174,7 @@ def _aggregate_sta_metrics(
                 "delaySum": 0.0,
                 "jitterSum": 0.0,
                 "protocols": set(),
+                "traffic": set(),
                 "flows": [],
                 "firstTx": None,
                 "lastRx": None,
@@ -145,6 +197,10 @@ def _aggregate_sta_metrics(
             metrics["protocols"].add("UDP")
         elif proto:
             metrics["protocols"].add(proto)
+
+        traffic_label = _classify_traffic(metadata)
+        if traffic_label:
+            metrics["traffic"].add(traffic_label)
 
         first_tx = flow_info["timeFirstTxPacket"]
         last_rx = flow_info["timeLastRxPacket"]
@@ -176,20 +232,53 @@ def _format_rows(sta_metrics: Dict[str, dict], sim_time: float | None) -> Iterab
         if duration > 0:
             throughput_mbps = metrics["rxBytes"] * 8.0 / duration / 1e6
 
+        avg_jitter_ms = (
+            (metrics["jitterSum"] / max(rx_packets - 1, 1)) * 1000.0 if rx_packets > 1 else 0.0
+        )
+
+        traffic_summary = ", ".join(sorted(metrics["traffic"])) if metrics["traffic"] else "Unknown"
+        protocol_summary = "/".join(sorted(metrics["protocols"])) if metrics["protocols"] else "N/A"
+
         row = {
             "sta_ip": sta_ip,
-            "protocol": "/".join(sorted(metrics["protocols"])) or "N/A",
+            "traffic_types": traffic_summary,
+            "l4_protocols": protocol_summary,
             "tx_packets": tx_packets,
             "rx_packets": rx_packets,
             "lost_packets": metrics["lostPackets"],
             "pdr_percent": (rx_packets / tx_packets * 100.0) if tx_packets > 0 else 0.0,
             "avg_delay_ms": (delay_sum / rx_packets * 1000.0) if rx_packets > 0 else 0.0,
+            "avg_jitter_ms": avg_jitter_ms,
             "throughput_mbps": throughput_mbps,
         }
         yield row
 
 
-def _print_report(rows: Iterable[dict]) -> None:
+def _compute_summary(rows: Iterable[dict]) -> Optional[dict]:
+    rows = list(rows)
+    totals = {
+        "pdr_percent": 0.0,
+        "avg_delay_ms": 0.0,
+        "avg_jitter_ms": 0.0,
+        "throughput_mbps": 0.0,
+    }
+    counted = 0
+    for row in rows:
+        if row["tx_packets"] <= 0:
+            continue
+        totals["pdr_percent"] += row["pdr_percent"]
+        totals["avg_delay_ms"] += row["avg_delay_ms"]
+        totals["avg_jitter_ms"] += row["avg_jitter_ms"]
+        totals["throughput_mbps"] += row["throughput_mbps"]
+        counted += 1
+
+    if counted == 0:
+        return None
+
+    return {key: value / counted for key, value in totals.items()}
+
+
+def _print_report(rows: Iterable[dict], summary: Optional[dict]) -> None:
     """Print a human-readable report to stdout."""
     rows = list(rows)
     if not rows:
@@ -198,9 +287,11 @@ def _print_report(rows: Iterable[dict]) -> None:
 
     header = (
         f"{'STA IP':<16}"
-        f"{'Protocol':<12}"
+        f"{'Traffic':<24}"
+        f"{'L4':<10}"
         f"{'PDR (%)':>10}"
         f"{'Avg Delay (ms)':>16}"
+        f"{'Avg Jit (ms)':>16}"
         f"{'Throughput (Mbps)':>20}"
         f"{'TX Pkts':>12}"
         f"{'RX Pkts':>12}"
@@ -209,36 +300,29 @@ def _print_report(rows: Iterable[dict]) -> None:
     print(header)
     print("-" * len(header))
 
-    total_pdr = 0.0
-    total_delay = 0.0
-    total_throughput = 0.0
-    counted = 0
-
     for row in rows:
         print(
             f"{row['sta_ip']:<16}"
-            f"{row['protocol']:<12}"
+            f"{row['traffic_types']:<24}"
+            f"{row['l4_protocols']:<10}"
             f"{row['pdr_percent']:>10.2f}"
             f"{row['avg_delay_ms']:>16.2f}"
+            f"{row['avg_jitter_ms']:>16.2f}"
             f"{row['throughput_mbps']:>20.4f}"
             f"{row['tx_packets']:>12}"
             f"{row['rx_packets']:>12}"
             f"{row['lost_packets']:>12}"
         )
-        if row["tx_packets"] > 0:
-            total_pdr += row["pdr_percent"]
-            total_delay += row["avg_delay_ms"]
-            total_throughput += row["throughput_mbps"]
-            counted += 1
-
     print("-" * len(header))
-    if counted > 0:
+    if summary:
         print(
             f"{'AVERAGE':<16}"
-            f"{'':<12}"
-            f"{(total_pdr / counted):>10.2f}"
-            f"{(total_delay / counted):>16.2f}"
-            f"{(total_throughput / counted):>20.4f}"
+            f"{'':<24}"
+            f"{'':<10}"
+            f"{summary['pdr_percent']:>10.2f}"
+            f"{summary['avg_delay_ms']:>16.2f}"
+            f"{summary['avg_jitter_ms']:>16.2f}"
+            f"{summary['throughput_mbps']:>20.4f}"
             f"{'':>12}"
             f"{'':>12}"
             f"{'':>12}"
@@ -254,9 +338,11 @@ def _write_csv(rows: Iterable[dict], csv_path: Path) -> None:
 
     fieldnames = [
         "sta_ip",
-        "protocol",
+        "traffic_types",
+        "l4_protocols",
         "pdr_percent",
         "avg_delay_ms",
+        "avg_jitter_ms",
         "throughput_mbps",
         "tx_packets",
         "rx_packets",
@@ -275,29 +361,21 @@ def _write_markdown(rows: Iterable[dict], md_path: Path) -> None:
         print(f"No data to write to {md_path}")
         return
 
-    header = [
-        "STA IP",
-        "Protocol",
-        "PDR (%)",
-        "Avg Delay (ms)",
-        "Throughput (Mbps)",
-        "TX Packets",
-        "RX Packets",
-        "Lost Packets",
-    ]
     with md_path.open("w") as md_file:
         md_file.write("# FlowMonitor STA Metrics\n\n")
-        md_file.write("| " + " | ".join(header) + " |\n")
-        md_file.write("|" + "|".join([" --- " for _ in header]) + "|\n")
+        md_file.write("| STA IP | Traffic Types | L4 Protocols | PDR (%) | Avg Delay (ms) | Avg Jitter (ms) | Throughput (Mbps) | TX Packets | RX Packets | Lost Packets |\n")
+        md_file.write("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
         for row in rows:
             md_file.write(
                 "| "
                 + " | ".join(
                     [
                         row["sta_ip"],
-                        row["protocol"],
+                        row["traffic_types"],
+                        row["l4_protocols"],
                         f"{row['pdr_percent']:.2f}",
                         f"{row['avg_delay_ms']:.2f}",
+                        f"{row['avg_jitter_ms']:.2f}",
                         f"{row['throughput_mbps']:.4f}",
                         str(row["tx_packets"]),
                         str(row["rx_packets"]),
@@ -305,6 +383,12 @@ def _write_markdown(rows: Iterable[dict], md_path: Path) -> None:
                     ]
                 )
                 + " |\n"
+            )
+        summary = _compute_summary(rows)
+        if summary:
+            md_file.write(
+                f"| **Average** |  |  | {summary['pdr_percent']:.2f} | {summary['avg_delay_ms']:.2f} | "
+                f"{summary['avg_jitter_ms']:.2f} | {summary['throughput_mbps']:.4f} |  |  |  |\n"
             )
     print(f"Wrote Markdown report to {md_path}")
 
@@ -348,8 +432,9 @@ def main(argv: Iterable[str] | None = None) -> int:
     flows, classifier = _parse_flowmon(xml_path)
     sta_metrics = _aggregate_sta_metrics(flows, classifier)
     rows = list(_format_rows(sta_metrics, args.sim_time))
+    summary = _compute_summary(rows)
 
-    _print_report(rows)
+    _print_report(rows, summary)
 
     if args.csv:
         _write_csv(rows, args.csv)

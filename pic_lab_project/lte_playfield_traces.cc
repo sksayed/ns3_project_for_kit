@@ -25,6 +25,7 @@
 #include <cmath>
 #include <vector>
 #include <map>
+#include <algorithm>
 #include <array>
 #include <filesystem>
 
@@ -39,8 +40,7 @@ static const std::string kOutDir = "Lte_outputs";
 void ConfigureUeMobility(NodeContainer& ueNodes,
                          double field,
                          double minHeight,
-                         double maxHeight,
-                         bool useAnchorPositions);
+                         double maxHeight);
 void ConfigureEnbMobility(NodeContainer& enbNodes, double field);
 BuildingContainer CreateBuildingObstacles(double field);
 void SetupInternetApplications(NodeContainer ueNodes,
@@ -134,22 +134,18 @@ int main(int argc, char **argv) {
   const double simStop = 30.0;
   const double minHeight = 0.0;
   const double maxHeight = 30.0;
-  bool useAnchorPositions = false;
   uint32_t rngSeed = 1;
   uint32_t packetSize = 1400;
-  uint32_t httpBytes = 2 * 1024 * 1024;
-  uint32_t httpsBytes = 2 * 1024 * 1024;
+  uint32_t httpBytes = 1 * 1024 * 1024;
+  uint32_t httpsBytes = 1 * 1024 * 1024;
   uint32_t videoBytes = 3 * 1024 * 1024;
   uint32_t voipBytes = 1 * 1024 * 1024;
-  uint32_t mixedBytes = 2 * 1024 * 1024;
-  uint32_t extraHttpBytes = 2500000;
+  uint32_t mixedBytes = 1 * 1024 * 1024;
+  uint32_t extraHttpBytes = 1 * 1024 * 1024;
   std::string outputDir = kOutDir;
+  double flowScale = 1.0;
 
   CommandLine cmd(__FILE__);
-  cmd.AddValue(
-      "useAnchorPositions",
-      "Use predefined anchor layout for UE initial positions instead of uniform random distribution.",
-      useAnchorPositions);
   cmd.AddValue("nUes", "Number of UE nodes to create", nUes);
   cmd.AddValue("rngSeed", "RNG seed for reproducible runs", rngSeed);
   cmd.AddValue("packetSize", "Application packet size in bytes for TCP/UDP flows", packetSize);
@@ -160,11 +156,24 @@ int main(int argc, char **argv) {
   cmd.AddValue("mixedBytes", "Total bytes for each mixed BulkSend flow", mixedBytes);
   cmd.AddValue("extraHttpBytes", "Total bytes for the additional HTTP BulkSend flow", extraHttpBytes);
   cmd.AddValue("outputDir", "Directory where run artifacts (XML/metrics) are stored", outputDir);
+  cmd.AddValue("flowScale",
+               "Multiplier applied to HTTP/HTTPS/Video/VoIP/Mixed/Extra HTTP byte budgets (1=default)",
+               flowScale);
   cmd.Parse(argc, argv);
 
   RngSeedManager::SetSeed(rngSeed);
   Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue(packetSize));
   fs::create_directories(fs::path(outputDir));
+
+  auto scaleBytes = [flowScale](uint32_t value) -> uint32_t {
+    return static_cast<uint32_t>(std::max(1.0, std::round(static_cast<double>(value) * flowScale)));
+  };
+  httpBytes = scaleBytes(httpBytes);
+  httpsBytes = scaleBytes(httpsBytes);
+  videoBytes = scaleBytes(videoBytes);
+  voipBytes = scaleBytes(voipBytes);
+  mixedBytes = scaleBytes(mixedBytes);
+  extraHttpBytes = scaleBytes(extraHttpBytes);
 
   // Create UE nodes and macro eNB nodes (two towers outside the field)
   NodeContainer ueNodes;
@@ -172,7 +181,7 @@ int main(int argc, char **argv) {
   NodeContainer enbNodes;
   enbNodes.Create(1);
 
-  ConfigureUeMobility(ueNodes, field, minHeight, maxHeight, useAnchorPositions);
+  ConfigureUeMobility(ueNodes, field, minHeight, maxHeight);
   ConfigureEnbMobility(enbNodes, field);
 
   BuildingContainer buildings = CreateBuildingObstacles(field);
@@ -183,8 +192,7 @@ int main(int argc, char **argv) {
   Config::SetDefault("ns3::LteEnbPhy::TxPower", DoubleValue(43.0)); // dBm
   Config::SetDefault("ns3::LteUePhy::TxPower", DoubleValue(15.0));  // dBm
   std::cout << "TxPower settings: eNB=43.00 dBm, UE=15.00 dBm" << std::endl;
-  std::cout << "UE initial position mode: "
-            << (useAnchorPositions ? "anchor layout" : "uniform random distribution") << std::endl;
+  std::cout << "UE initial position mode: uniform random distribution" << std::endl;
 
   // LTE + EPC
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
@@ -403,8 +411,7 @@ int main(int argc, char **argv) {
 void ConfigureUeMobility(NodeContainer& ueNodes,
                          double field,
                          double minHeight,
-                         double maxHeight,
-                         bool useAnchorPositions) {
+                         double maxHeight) {
   std::cout << "\n=== Configuring UE Mobility (Gauss-Markov) ===" << std::endl;
 
   double minX = 0.0;
@@ -417,53 +424,22 @@ void ConfigureUeMobility(NodeContainer& ueNodes,
   MobilityHelper mobility;
   Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
 
-  if (useAnchorPositions)
+  Ptr<UniformRandomVariable> xVar = CreateObject<UniformRandomVariable>();
+  Ptr<UniformRandomVariable> yVar = CreateObject<UniformRandomVariable>();
+  Ptr<UniformRandomVariable> zVar = CreateObject<UniformRandomVariable>();
+  xVar->SetAttribute("Min", DoubleValue(minX));
+  xVar->SetAttribute("Max", DoubleValue(maxX));
+  yVar->SetAttribute("Min", DoubleValue(minY));
+  yVar->SetAttribute("Max", DoubleValue(maxY));
+  zVar->SetAttribute("Min", DoubleValue(minZ));
+  zVar->SetAttribute("Max", DoubleValue(maxZ));
+
+  for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
   {
-    static const std::vector<Vector> kAnchorPositions = {
-        Vector(130.0, 200.0, 5.0),
-        Vector(120.0, 230.0, 5.0),
-        Vector(90.0, 240.0, 5.0),
-        Vector(270.0, 200.0, 5.0),
-        Vector(300.0, 200.0, 5.0),
-        Vector(135.0, 165.0, 5.0),
-        Vector(320.0, 170.0, 5.0),
-        Vector(310.0, 300.0, 5.0),
-        Vector(170.0, 320.0, 5.0),
-        Vector(320.0, 320.0, 5.0),
-        Vector(180.0, 150.0, 5.0),
-        Vector(150.0, 180.0, 5.0),
-        Vector(120.0, 150.0, 5.0),
-        Vector(330.0, 150.0, 5.0),
-        Vector(300.0, 120.0, 5.0)};
-
-    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
-    {
-      const Vector& anchor = kAnchorPositions[i % kAnchorPositions.size()];
-      posAlloc->Add(anchor);
-    }
-
-    std::cout << "Initial positions: predefined anchor layout (" << kAnchorPositions.size()
-              << " entries)" << std::endl;
+    posAlloc->Add(Vector(xVar->GetValue(), yVar->GetValue(), zVar->GetValue()));
   }
-  else
-  {
-    Ptr<UniformRandomVariable> xVar = CreateObject<UniformRandomVariable>();
-    Ptr<UniformRandomVariable> yVar = CreateObject<UniformRandomVariable>();
-    Ptr<UniformRandomVariable> zVar = CreateObject<UniformRandomVariable>();
-    xVar->SetAttribute("Min", DoubleValue(minX));
-    xVar->SetAttribute("Max", DoubleValue(maxX));
-    yVar->SetAttribute("Min", DoubleValue(minY));
-    yVar->SetAttribute("Max", DoubleValue(maxY));
-    zVar->SetAttribute("Min", DoubleValue(minZ));
-    zVar->SetAttribute("Max", DoubleValue(maxZ));
 
-    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
-    {
-      posAlloc->Add(Vector(xVar->GetValue(), yVar->GetValue(), zVar->GetValue()));
-    }
-
-    std::cout << "Initial positions: uniform random distribution across field bounds" << std::endl;
-  }
+  std::cout << "Initial positions: uniform random distribution across field bounds" << std::endl;
 
   mobility.SetPositionAllocator(posAlloc);
   mobility.SetMobilityModel("ns3::GaussMarkovMobilityModel",
@@ -663,12 +639,12 @@ void SetupInternetApplications(NodeContainer ueNodes,
   };
 
   const std::vector<FlowPattern> kFlowPattern = {
-      {FlowType::Http, httpBytes, 15.0},   {FlowType::Http, httpBytes, 15.2},
-      {FlowType::Https, httpsBytes, 15.4}, {FlowType::Https, httpsBytes, 15.6},
-      {FlowType::Video, videoBytes, 15.8}, {FlowType::Video, videoBytes, 16.0},
-      {FlowType::Voip, voipBytes, 16.2},   {FlowType::Voip, voipBytes, 16.4},
-      {FlowType::Http, extraHttpBytes, 16.6},
-      {FlowType::Mixed, mixedBytes, 16.8},
+      {FlowType::Http, httpBytes, 10.0},   {FlowType::Http, httpBytes, 10.1},
+      {FlowType::Https, httpsBytes, 10.2}, {FlowType::Https, httpsBytes, 10.3},
+      {FlowType::Video, videoBytes, 10.4}, {FlowType::Video, videoBytes, 10.5},
+      {FlowType::Voip, voipBytes, 10.6},   {FlowType::Voip, voipBytes, 10.7},
+      {FlowType::Http, extraHttpBytes, 10.8},
+      {FlowType::Mixed, mixedBytes, 11.0},
   };
 
   const InetSocketAddress httpAddress(remoteHostAddr, httpPort);
