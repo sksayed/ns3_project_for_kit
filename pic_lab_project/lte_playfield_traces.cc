@@ -13,6 +13,9 @@
 #include "ns3/rng-seed-manager.h"
 #include "ns3/hybrid-buildings-propagation-loss-model.h"
 #include "ns3/isotropic-antenna-model.h"
+#include "ns3/lte-enb-net-device.h"
+#include "ns3/lte-ue-net-device.h"
+#include "ns3/lte-ue-rrc.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -51,6 +54,11 @@ void SetupInternetApplications(NodeContainer ueNodes,
                                uint32_t voipBytes,
                                uint32_t mixedBytes,
                                uint32_t extraHttpBytes);
+void AttachUesToEnbs(Ptr<LteHelper> lteHelper,
+                     NodeContainer ueNodes,
+                     NodeContainer enbNodes,
+                     NetDeviceContainer ueDevs,
+                     NetDeviceContainer enbDevs);
 
 // RRC trace callbacks for better runtime visibility
 static void NotifyConnectionEstablishedUe(std::string context, uint64_t imsi,
@@ -116,10 +124,10 @@ int main(int argc, char **argv) {
   //   LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_DEBUG);
   //   // TCP logging
   //   LogComponentEnable("BulkSendApplication", LOG_LEVEL_DEBUG);
-  LogComponentEnable("TcpSocketBase", LOG_LEVEL_DEBUG);
+  // LogComponentEnable("TcpSocketBase", LOG_LEVEL_DEBUG);
   //   LogComponentEnable("TcpL4Protocol", LOG_LEVEL_DEBUG);
   // UDP logging (disabled when UDP traffic is commented out)
-  LogComponentEnable("UdpServer", LOG_LEVEL_INFO);
+  // LogComponentEnable("UdpServer", LOG_LEVEL_INFO);
 
   uint32_t nUes = 10;
   const double field = 400.0;
@@ -162,7 +170,7 @@ int main(int argc, char **argv) {
   NodeContainer ueNodes;
   ueNodes.Create(nUes);
   NodeContainer enbNodes;
-  enbNodes.Create(2);
+  enbNodes.Create(1);
 
   ConfigureUeMobility(ueNodes, field, minHeight, maxHeight, useAnchorPositions);
   ConfigureEnbMobility(enbNodes, field);
@@ -193,7 +201,6 @@ int main(int argc, char **argv) {
   NetDeviceContainer ueDevs = lteHelper->InstallUeDevice(ueNodes);
 
   // Enable X2 and LTE traces for better visualization
-  lteHelper->AddX2Interface(enbNodes);
   lteHelper->EnablePhyTraces();
   lteHelper->EnableMacTraces();
   lteHelper->EnableRlcTraces();
@@ -226,25 +233,7 @@ int main(int argc, char **argv) {
     ueStaticRouting->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress(), 1);
   }
 
-  // Attach each UE to the nearest eNB by distance
-  for (uint32_t i = 0; i < ueNodes.GetN(); ++i) {
-    Ptr<MobilityModel> ueMob = ueNodes.Get(i)->GetObject<MobilityModel>();
-    Vector uePos = ueMob->GetPosition();
-    double bestDist = std::numeric_limits<double>::max();
-    uint32_t bestEnbIdx = 0;
-    for (uint32_t e = 0; e < enbNodes.GetN(); ++e) {
-      Ptr<MobilityModel> em = enbNodes.Get(e)->GetObject<MobilityModel>();
-      Vector ep = em->GetPosition();
-      double dx = uePos.x - ep.x;
-      double dy = uePos.y - ep.y;
-      double dist2 = dx * dx + dy * dy;
-      if (dist2 < bestDist) {
-        bestDist = dist2;
-        bestEnbIdx = e;
-      }
-    }
-    lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(bestEnbIdx));
-  }
+  AttachUesToEnbs(lteHelper, ueNodes, enbNodes, ueDevs, enbDevs);
 
   // Report eNB Macro layout
   {
@@ -393,6 +382,7 @@ int main(int argc, char **argv) {
   std::ostringstream parseCmd;
   parseCmd << "cd /home/sayed/pic_lab_project/ns3_project_for_kit && "
            << "python3 pic_lab_project/parse_lte_flowmon.py"
+           << " --xml " << outputDir << "/" << kFlowmonFile
            << " --sim-time=" << simStop
            << " --md " << outputDir << "/lte-playfield-metrics.md";
 
@@ -430,14 +420,14 @@ void ConfigureUeMobility(NodeContainer& ueNodes,
   if (useAnchorPositions)
   {
     static const std::vector<Vector> kAnchorPositions = {
-        Vector(170.0, 10.0, 5.0),
-        Vector(135.0, 25.0, 5.0),
-        Vector(320.0, 10.0, 5.0),
-        Vector(285.0, 22.0, 5.0),
-        Vector(170.0, 170.0, 5.0),
+        Vector(130.0, 200.0, 5.0),
+        Vector(120.0, 230.0, 5.0),
+        Vector(90.0, 240.0, 5.0),
+        Vector(270.0, 200.0, 5.0),
+        Vector(300.0, 200.0, 5.0),
         Vector(135.0, 165.0, 5.0),
         Vector(320.0, 170.0, 5.0),
-        Vector(285.0, 165.0, 5.0),
+        Vector(310.0, 300.0, 5.0),
         Vector(170.0, 320.0, 5.0),
         Vector(320.0, 320.0, 5.0),
         Vector(180.0, 150.0, 5.0),
@@ -499,11 +489,17 @@ void ConfigureEnbMobility(NodeContainer& enbNodes, double field) {
   std::cout << "=== Configuring eNB Macro Positions ===" << std::endl;
   MobilityHelper enbMob;
   Ptr<ListPositionAllocator> enbPos = CreateObject<ListPositionAllocator>();
-  enbPos->Add(Vector(-100.0, field * 0.5, 30.0));       // West macro site
-  enbPos->Add(Vector(field + 100.0, field * 0.5, 30.0)); // East macro site
+  enbPos->Add(Vector(200.0, 200.0, 30.0));
   enbMob.SetPositionAllocator(enbPos);
   enbMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
   enbMob.Install(enbNodes);
+
+  for (uint32_t e = 0; e < enbNodes.GetN(); ++e)
+  {
+    Ptr<MobilityModel> mm = enbNodes.Get(e)->GetObject<MobilityModel>();
+    Vector p = mm->GetPosition();
+    std::cout << "  eNB" << e << ": (" << p.x << ", " << p.y << ", " << p.z << ")" << std::endl;
+  }
   std::cout << "====================================\n" << std::endl;
 }
 
@@ -545,6 +541,75 @@ BuildingContainer CreateBuildingObstacles(double field) {
   std::cout << "====================================\n" << std::endl;
 
   return buildings;
+}
+
+void AttachUesToEnbs(Ptr<LteHelper> lteHelper,
+                     NodeContainer ueNodes,
+                     NodeContainer enbNodes,
+                     NetDeviceContainer ueDevs,
+                     NetDeviceContainer enbDevs)
+{
+  std::cout << "=== Attaching UEs via LTE measurement framework ===" << std::endl;
+
+  if (enbNodes.GetN() > 1)
+  {
+    lteHelper->AddX2Interface(enbNodes);
+  }
+
+  lteHelper->SetHandoverAlgorithmType("ns3::A3RsrpHandoverAlgorithm");
+  lteHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(3.0));
+  lteHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(160)));
+
+  lteHelper->AttachToClosestEnb(ueDevs, enbDevs);
+
+  std::map<uint16_t, std::pair<uint32_t, Vector>> cellIdToInfo;
+  for (uint32_t e = 0; e < enbNodes.GetN(); ++e)
+  {
+    Ptr<LteEnbNetDevice> enbDev = DynamicCast<LteEnbNetDevice>(enbDevs.Get(e));
+    NS_ABORT_MSG_IF(enbDev == nullptr, "AttachUesToEnbs: expected LteEnbNetDevice");
+    uint16_t cellId = enbDev->GetCellId();
+    Vector pos = enbNodes.Get(e)->GetObject<MobilityModel>()->GetPosition();
+    cellIdToInfo.emplace(cellId, std::make_pair(e, pos));
+  }
+
+  for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+  {
+    Ptr<MobilityModel> ueMob = ueNodes.Get(i)->GetObject<MobilityModel>();
+    NS_ABORT_MSG_IF(ueMob == nullptr, "AttachUesToEnbs: UE " << i << " missing MobilityModel");
+    Vector uePos = ueMob->GetPosition();
+
+    Ptr<LteUeNetDevice> ueDev = DynamicCast<LteUeNetDevice>(ueDevs.Get(i));
+    NS_ABORT_MSG_IF(ueDev == nullptr, "AttachUesToEnbs: expected LteUeNetDevice");
+    Ptr<LteUeRrc> ueRrc = ueDev->GetRrc();
+    uint16_t servingCellId = ueRrc->GetCellId();
+
+    uint32_t servingIndex = 0;
+    Vector enbPos;
+    auto cellIt = cellIdToInfo.find(servingCellId);
+    if (cellIt != cellIdToInfo.end())
+    {
+      servingIndex = cellIt->second.first;
+      enbPos = cellIt->second.second;
+    }
+    else
+    {
+      enbPos = enbNodes.Get(0)->GetObject<MobilityModel>()->GetPosition();
+    }
+
+    double dx = uePos.x - enbPos.x;
+    double dy = uePos.y - enbPos.y;
+    double dz = uePos.z - enbPos.z;
+    double groundDist = std::sqrt(dx * dx + dy * dy);
+    double spatialDist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+    std::cout << "UE " << i << " attached to eNB" << servingIndex << " (CellId=" << servingCellId
+              << ") | UE=(" << uePos.x << ", " << uePos.y << ", " << uePos.z << ") eNB=("
+              << enbPos.x << ", " << enbPos.y << ", " << enbPos.z
+              << ") groundDist=" << std::fixed << std::setprecision(2) << groundDist
+              << "m spatialDist=" << spatialDist << "m" << std::endl;
+  }
+
+  std::cout << "====================================\n" << std::endl;
 }
 
 void SetupInternetApplications(NodeContainer ueNodes,
