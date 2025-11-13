@@ -17,6 +17,9 @@
 *.tr
 [D|U]l[A-Z][a-z]*Stats.txt
 
+# Simulation artifacts
+wifi_test_research/six_node_layout/*.xml
+
 \#*#
 *~
 
