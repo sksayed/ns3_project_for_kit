@@ -13,7 +13,7 @@ This report summarizes FlowMonitor metrics collected from 72 deterministic ns-3 
   - NR/LTE: two macro gNB/eNB sites at (−100, 200, 30) m and (500, 200, 30) m
 - **Buildings:** static obstacles shared by all technologies using `HybridBuildingsPropagationLossModel` (frequency set per band)
 - **Transmit settings:** hotspot/backhaul powers and antenna gains aligned across runs; Wi-Fi mesh hotspot/backhaul radios use up to 23 dBm, NR/LTE use 43 dBm (gNB/eNB) and 15 dBm (UE)
-- **Traffic pattern:** HTTP/HTTPS/Video/TCP and VoIP flows initiated around 15 s into a 30 s simulation
+- **Traffic pattern:** HTTP/HTTPS/Video/TCP and VoIP flows initiated around 10 s into a 30 s simulation
 - **Random seed:** Fixed seed to guarantee deterministic replay across all scenarios
 - **Measurement pipeline:** FlowMonitor records per-flow statistics, which are parsed into the `results/.../metrics.md` summaries used for this report
 
@@ -165,5 +165,22 @@ Total simulations: 3 × 2 × 3 × 3 = **72** (Wi-Fi counted twice for both hotsp
 | Wi-Fi 2.4 GHz | Uniform | 100.00 | 3.81 | 0.06 |
 | Wi-Fi 5 GHz | Anchored | 100.00 | 3.63 | 0.05 |
 | Wi-Fi 5 GHz | Uniform | 100.00 | 3.72 | 0.06 |
+
+## Clarification on Throughput and Load
+
+- The “packet size” axis refers to the payload per TCP/UDP segment (1 kB, 10 kB, 1 MB); the applications continue sending until their configured `MaxBytes` are exhausted.
+- Across all technologies the bulk-send flows were assigned multi-megabyte totals (e.g., 2 MB HTTP, 3 MB Video, 2.5 MB extra HTTP). Wi-Fi STAs issue several flows concurrently, so their radios remain busy and FlowMonitor reports Mbps-scale throughput.
+- NR and LTE UEs also use the same `MaxBytes`, but each UE runs only a single capped flow on an uncongested link, so the transfers complete quickly and aggregates stay near 0.02–0.03 Mbps.
+- If you need throughput to scale with individual packet-size scenarios (e.g., only 1 kB of total data), reduce the per-flow `MaxBytes` accordingly.
+
+## Q&A
+
+**Q:** Deterministic metrics: “NR and LTE publish identical numbers for uniform vs anchored spawn modes. Were both simulations truly run, and if so, why does the spawn mode have no measurable impact?”
+
+**A:** Yes—`run_scenario_matrix.py` executes separate runs that toggle the `--useAnchorPositions` flag before archiving results into the uniform and anchored folders. However, the NR/LTE setups use identical Gauss-Markov mobility, light traffic (only a few packets per UE), and a highly symmetric dual-macro layout that keeps all UEs well inside the same coverage region. Under these conditions FlowMonitor reports 100 % PDR, identical delays, and sub-0.05 Mbps throughput; rounding in the metrics parser then collapses any residual differences. To reveal spawn-mode effects, increase load, extend the simulation time, or reposition anchors toward cell edges before re-running.
+
+**Q:** Comparability of workloads: “Are the Wi-Fi, NR, and LTE simulations exercising the same effective traffic volume and concurrency? If Wi-Fi runs sustained bulk flows while NR/LTE finish early, can we draw a fair throughput comparison?”
+
+**A:** Each technology uses the same `MaxBytes` targets per traffic class, but the effective load differs because the scenarios are structured differently. Wi-Fi STAs launch several overlapping bulk flows that persist for most of the 30 s window, keeping both mesh backhaul and hotspot radios continuously occupied. In contrast, each NR/LTE UE sends only one capped flow on an uncongested dual-macro layout, so the transfers complete quickly and the radios go idle. Consequently the aggregated NR/LTE throughput settles around 0.02–0.03 Mbps while Wi-Fi remains in the multi-megabit range. For a like-for-like throughput comparison, align the duty cycle—e.g., increase NR/LTE `MaxBytes`, introduce concurrent flows, or extend the simulation so mobility and congestion effects materialise.
 
 

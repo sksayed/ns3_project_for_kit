@@ -28,6 +28,9 @@
 #include "ns3/network-module.h"
 #include "ns3/nr-helper.h"
 #include "ns3/nr-module.h"
+#include "ns3/nr-gnb-net-device.h"
+#include "ns3/nr-ue-net-device.h"
+#include "ns3/nr-ue-rrc.h"
 #include "ns3/nr-point-to-point-epc-helper.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/ideal-beamforming-algorithm.h"
@@ -512,11 +515,11 @@ ConfigureUeMobility(NodeContainer& ueNodes,
     if (useAnchorPositions)
     {
         static const std::vector<Vector> kAnchorPositions = {
-            Vector(170.0, 10.0, 5.0),
+            Vector(130.0, 200.0, 5.0),
             Vector(120.0, 230.0, 5.0),
             Vector(90.0, 240.0, 5.0),
-            Vector(285.0, 40.0, 5.0),
-            Vector(80.0, 180.0, 5.0),
+            Vector(270.0, 200.0, 5.0),
+            Vector(300.0, 200.0, 5.0),
             Vector(135.0, 165.0, 5.0),
             Vector(320.0, 170.0, 5.0),
             Vector(310.0, 300.0, 5.0),
@@ -591,8 +594,8 @@ ConfigureGnbMobility(NodeContainer& gnbNodes, double field)
     
     MobilityHelper gnbMob;
     Ptr<ListPositionAllocator> gnbPos = CreateObject<ListPositionAllocator>();
-    gnbPos->Add(Vector(-100.0, field * 0.5, 30.0));
-    gnbPos->Add(Vector(field + 100.0, field * 0.5, 30.0));
+    gnbPos->Add(Vector(-20.0, field * 0.5, 30.0));
+    gnbPos->Add(Vector(field + 20.0, field * 0.5, 30.0));
     gnbMob.SetPositionAllocator(gnbPos);
     gnbMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     gnbMob.Install(gnbNodes);
@@ -670,14 +673,6 @@ CreateBuildingObstacles(double field)
     return buildings;
 }
 
-/**
- * Attach UEs to nearest gNBs based on distance
- * @param nrHelper NR helper object
- * @param ueNodes Container of UE nodes
- * @param gnbNodes Container of gNB nodes
- * @param ueDevs UE network devices
- * @param gnbDevs gNB network devices
- */
 void
 AttachUesToGnbs(Ptr<NrHelper> nrHelper,
                NodeContainer ueNodes,
@@ -685,35 +680,66 @@ AttachUesToGnbs(Ptr<NrHelper> nrHelper,
                NetDeviceContainer ueDevs,
                NetDeviceContainer gnbDevs)
 {
-    std::cout << "=== Attaching UEs to gNBs ===" << std::endl;
-    
+    std::cout << "=== Attaching UEs via NR measurement framework ===" << std::endl;
+
+    if (gnbNodes.GetN() > 1)
+    {
+        nrHelper->AddX2Interface(gnbNodes);
+    }
+
+    nrHelper->SetHandoverAlgorithmType("ns3::NrA3RsrpHandoverAlgorithm");
+    nrHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(3.0));
+    nrHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(160)));
+
+    nrHelper->AttachToClosestGnb(ueDevs, gnbDevs);
+
+    std::map<uint16_t, std::pair<uint32_t, Vector>> cellIdToInfo;
+    for (uint32_t g = 0; g < gnbNodes.GetN(); ++g)
+    {
+        Ptr<NrGnbNetDevice> gnbDev = DynamicCast<NrGnbNetDevice>(gnbDevs.Get(g));
+        NS_ABORT_MSG_IF(gnbDev == nullptr, "AttachUesToGnbs: expected NrGnbNetDevice");
+        uint16_t cellId = gnbDev->GetCellId();
+        Vector pos = gnbNodes.Get(g)->GetObject<MobilityModel>()->GetPosition();
+        cellIdToInfo.emplace(cellId, std::make_pair(g, pos));
+    }
+
     for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
     {
         Ptr<MobilityModel> ueMob = ueNodes.Get(i)->GetObject<MobilityModel>();
         NS_ABORT_MSG_IF(ueMob == nullptr, "AttachUesToGnbs: UE " << i << " missing MobilityModel");
         Vector uePos = ueMob->GetPosition();
-        double bestDist = std::numeric_limits<double>::max();
-        uint32_t bestGnbIdx = 0;
-        
-        for (uint32_t e = 0; e < gnbNodes.GetN(); ++e)
+
+        Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(ueDevs.Get(i));
+        NS_ABORT_MSG_IF(ueDev == nullptr, "AttachUesToGnbs: expected NrUeNetDevice");
+        Ptr<NrUeRrc> ueRrc = ueDev->GetRrc();
+        uint16_t servingCellId = ueRrc->GetCellId();
+
+        uint32_t servingIndex = 0;
+        Vector gnbPos;
+        auto cellIt = cellIdToInfo.find(servingCellId);
+        if (cellIt != cellIdToInfo.end())
         {
-            Ptr<MobilityModel> em = gnbNodes.Get(e)->GetObject<MobilityModel>();
-            NS_ABORT_MSG_IF(em == nullptr, "AttachUesToGnbs: gNB " << e << " missing MobilityModel");
-            Vector ep = em->GetPosition();
-            double dx = uePos.x - ep.x;
-            double dy = uePos.y - ep.y;
-            double dist2 = dx * dx + dy * dy;
-            
-            if (dist2 < bestDist)
-            {
-                bestDist = dist2;
-                bestGnbIdx = e;
-            }
+            servingIndex = cellIt->second.first;
+            gnbPos = cellIt->second.second;
         }
-        nrHelper->AttachToGnb(ueDevs.Get(i), gnbDevs.Get(bestGnbIdx));
-        std::cout << "UE " << i << " attached to gNB" << bestGnbIdx << std::endl;
+        else
+        {
+            gnbPos = gnbNodes.Get(0)->GetObject<MobilityModel>()->GetPosition();
+        }
+
+        double dx = uePos.x - gnbPos.x;
+        double dy = uePos.y - gnbPos.y;
+        double dz = uePos.z - gnbPos.z;
+        double groundDist = std::sqrt(dx * dx + dy * dy);
+        double spatialDist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+        std::cout << "UE " << i << " attached to gNB" << servingIndex << " (CellId=" << servingCellId
+                  << ") | UE=(" << uePos.x << ", " << uePos.y << ", " << uePos.z << ") gNB=("
+                  << gnbPos.x << ", " << gnbPos.y << ", " << gnbPos.z
+                  << ") groundDist=" << std::fixed << std::setprecision(2) << groundDist
+                  << "m spatialDist=" << spatialDist << "m" << std::endl;
     }
-    
+
     std::cout << "====================================\n" << std::endl;
 }
 
@@ -816,9 +842,8 @@ SetupInternetApplications(NodeContainer ueNodes,
         switch (pattern.type)
         {
         case FlowType::Http:
-        case FlowType::Mixed:
         {
-            BulkSendHelper sender("ns3::TcpSocketFactory", videoAddress);
+            BulkSendHelper sender("ns3::TcpSocketFactory", httpAddress);
             sender.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
             sender.SetAttribute("SendSize", UintegerValue(packetSize));
             ApplicationContainer app = sender.Install(ueNodes.Get(i));
@@ -829,7 +854,7 @@ SetupInternetApplications(NodeContainer ueNodes,
         }
         case FlowType::Https:
         {
-            BulkSendHelper sender("ns3::TcpSocketFactory", videoAddress);
+            BulkSendHelper sender("ns3::TcpSocketFactory", httpsAddress);
             sender.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
             sender.SetAttribute("SendSize", UintegerValue(packetSize));
             ApplicationContainer app = sender.Install(ueNodes.Get(i));
@@ -841,6 +866,17 @@ SetupInternetApplications(NodeContainer ueNodes,
         case FlowType::Video:
         {
             BulkSendHelper sender("ns3::TcpSocketFactory", videoAddress);
+            sender.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
+            sender.SetAttribute("SendSize", UintegerValue(packetSize));
+            ApplicationContainer app = sender.Install(ueNodes.Get(i));
+            app.Start(Seconds(startTime));
+            app.Stop(Seconds(simStop));
+            clientApps.Add(app);
+            break;
+        }
+        case FlowType::Mixed:
+        {
+            BulkSendHelper sender("ns3::TcpSocketFactory", httpAddress);
             sender.SetAttribute("MaxBytes", UintegerValue(pattern.maxBytes));
             sender.SetAttribute("SendSize", UintegerValue(packetSize));
             ApplicationContainer app = sender.Install(ueNodes.Get(i));
