@@ -18,6 +18,7 @@
 #include "ns3/mac48-address.h"
 #include "ns3/simulator.h"
 #include "ns3/sta-wifi-mac.h"
+#include "ns3/rng-seed-manager.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -1249,6 +1250,7 @@ int main(int argc, char* argv[])
     uint32_t numStaNodes = 1;     // Single STA client (was 10)
     double meshApHeight = 1.5;     // Mesh AP height (meters) - for height optimization tests
     double staHeight = 5.0;        // STA node height (meters) - for vertical spacing tests
+    uint32_t rngSeed = 1;          // RNG seed for reproducible runs
     uint32_t meshConfig = 1;       // Mesh AP device configuration (0=Default, 1=TP-Link EAP225, 2=Netgear Orbi 960, 3=Asus ZenWiFi XT8)
     uint32_t uploadBytes = 1 * 1024 * 1024;
     uint32_t downloadBytes = 1 * 1024 * 1024;
@@ -1280,7 +1282,11 @@ int main(int argc, char* argv[])
     cmd.AddValue("outputDir", "Directory where run artifacts (metrics, flowmon, config) are stored", outputDir);
     cmd.AddValue("flowScale",
                  "Multiplier applied to upload/download byte budgets (1=1MB default)", flowScale);
+    cmd.AddValue("rngSeed", "RNG seed for reproducible runs", rngSeed);
     cmd.Parse(argc, argv);
+
+    RngSeedManager::SetSeed(rngSeed);
+    RngSeedManager::SetRun(rngSeed);
 
     if (packetSize == kDefaultPacketSize && tcpPacketSize != kDefaultPacketSize)
     {
