@@ -653,7 +653,7 @@ def generate_chart_section2_scalability(records: List[ScenarioRecord], figures_d
     
     image_refs: List[str] = []
     for metric_key, metric_label in metrics:
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(11, 6), dpi=200)
         
         sorted_techs = sorted(tech_node_data.keys(), key=lambda x: get_tech_key(x[0], x[1]))
         for tech, variant in sorted_techs:
@@ -680,7 +680,7 @@ def generate_chart_section2_scalability(records: List[ScenarioRecord], figures_d
         plt.tight_layout()
         filename = f"section2_{metric_key}.png"
         filepath = figures_dir / filename
-        plt.savefig(filepath, dpi=150, bbox_inches='tight')
+        plt.savefig(filepath, dpi=250, bbox_inches='tight')
         plt.close()
         
         image_refs.append(f"![Scalability Trends: {metric_label}](figures/{filename})")
@@ -728,7 +728,7 @@ def generate_chart_section3_statistical(records: List[ScenarioRecord], figures_d
             continue
         
         # Create true box plot
-        plt.figure(figsize=(10, 6), facecolor='white')
+        plt.figure(figsize=(9, 5.2), facecolor='white', dpi=150)
         
         # Use seaborn style if available
         try:
@@ -1236,7 +1236,7 @@ def _generate_section2_charts_from_tables(tables: Dict[str, List[Dict[str, str]]
         if not valid_techs:
             continue
         
-        plt.figure(figsize=(10, 6), facecolor='white')
+        plt.figure(figsize=(11, 6), dpi=200, facecolor='white')
         
         # Use seaborn style if available
         try:
@@ -1276,7 +1276,7 @@ def _generate_section2_charts_from_tables(tables: Dict[str, List[Dict[str, str]]
         
         plt.tight_layout()
         filename = f"section2_{metric_key}.png"
-        plt.savefig(figures_dir / filename, dpi=150, bbox_inches='tight', facecolor='white', edgecolor='none')
+        plt.savefig(figures_dir / filename, dpi=250, bbox_inches='tight', facecolor='white', edgecolor='none')
         plt.close()
 
 
@@ -1569,19 +1569,31 @@ def build_pdf_report(markdown_path: Path, output_path: Path) -> None:
     
     def wrap_consecutive_images(text):
         """Wrap consecutive image paragraphs in a chart-grid container."""
-        # Find all consecutive <p><img>...</p> patterns
+        # First, handle Section 2 charts (Scalability Trends) - put them in a single row
+        section2_pattern = r'(<p><img[^>]*alt="[^"]*Scalability Trends[^"]*"[^>]*></p>\s*){3}'
+        def replace_section2(match):
+            images = re.findall(r'<p><img[^>]*></p>', match.group(0))
+            if len(images) == 3:
+                return '<div class="chart-grid-section2">' + ''.join(images) + '</div>'
+            return match.group(0)
+        text = re.sub(section2_pattern, replace_section2, text)
+        
+        # Then handle other consecutive images (2x2 grid for Section 1)
         pattern = r'(<p><img[^>]*></p>)(?:\s*(?=<p><img[^>]*></p>))*'
         
         def replace_images(match):
             # Get the full match and find all image paragraphs in it
             full_match = match.group(0)
             images = re.findall(r'<p><img[^>]*></p>', full_match)
+            # Skip if already wrapped in section2 container
+            if 'chart-grid-section2' in full_match:
+                return full_match
             if len(images) >= 2:
                 # Wrap all images in a container
                 return '<div class="chart-grid">' + ''.join(images) + '</div>'
             return full_match
         
-        # Replace consecutive image patterns
+        # Replace consecutive image patterns (but not section2 ones)
         result = re.sub(r'(?:<p><img[^>]*></p>\s*){2,}', replace_images, text)
         return result
     
@@ -1600,6 +1612,30 @@ def build_pdf_report(markdown_path: Path, output_path: Path) -> None:
             margin: 0 auto;
             padding: 20px;
         }}
+        @page {{
+            size: A4;
+            margin: 20mm 20mm 30mm 20mm;
+            @bottom-center {{
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 10pt;
+                color: #666;
+                font-family: Arial, sans-serif;
+            }}
+        }}
+        /* First page - no footer */
+        @page:first {{
+            @bottom-center {{
+                content: "";
+            }}
+        }}
+        h2 {{
+            page-break-after: avoid;
+            page-break-inside: avoid;
+        }}
+        h3 {{
+            page-break-after: avoid;
+            page-break-inside: avoid;
+        }}
         h1 {{
             color: #1f4e79;
             border-bottom: 3px solid #1f4e79;
@@ -1610,12 +1646,25 @@ def build_pdf_report(markdown_path: Path, output_path: Path) -> None:
             margin-top: 30px;
             border-bottom: 2px solid #2e5f8a;
             padding-bottom: 5px;
+            page-break-after: avoid;
+            page-break-inside: avoid;
         }}
         table {{
             border-collapse: collapse;
             width: 100%;
             margin: 15px 0;
             font-size: 0.9em;
+            page-break-inside: auto;
+        }}
+        thead {{
+            display: table-header-group;
+        }}
+        tbody {{
+            display: table-row-group;
+        }}
+        tr {{
+            page-break-inside: avoid;
+            page-break-after: auto;
         }}
         th {{
             background-color: #1f4e79;
@@ -1650,10 +1699,32 @@ def build_pdf_report(markdown_path: Path, output_path: Path) -> None:
         }}
         img {{
             max-width: 100%;
+            max-height: 250mm;
             height: auto;
             display: block;
-            margin: 0;
+            margin: 10px auto;
             page-break-inside: avoid;
+            page-break-after: avoid;
+            page-break-before: auto;
+        }}
+        /* Visualization images - normal size, inline with content */
+        img[alt*="Visualization"] {{
+            max-height: 200mm;
+            max-width: 100%;
+            width: auto;
+            height: auto;
+            margin: 15px auto;
+            display: block;
+            page-break-inside: avoid;
+        }}
+        /* Prevent orphaned headings and content */
+        p {{
+            orphans: 3;
+            widows: 3;
+        }}
+        /* Better spacing for sections */
+        h2 + p, h3 + p {{
+            margin-top: 5px;
         }}
         /* Chart grid container for 2x2 layout using float (WeasyPrint compatible) */
         .chart-grid {{
@@ -1680,6 +1751,34 @@ def build_pdf_report(markdown_path: Path, output_path: Path) -> None:
             width: 100%;
             height: auto;
             display: block;
+        }}
+        /* Section 2 charts - one chart per row (3 rows) */
+        .chart-grid-section2 {{
+            width: 100%;
+            margin: 15px 0;
+            overflow: hidden;
+            clear: both;
+        }}
+        .chart-grid-section2::after {{
+            content: "";
+            display: table;
+            clear: both;
+        }}
+        .chart-grid-section2 p {{
+            margin: 0 0 20px 0;
+            width: 100%;
+            float: none;
+            clear: both;
+            box-sizing: border-box;
+        }}
+        .chart-grid-section2 p:last-child {{
+            margin-bottom: 0;
+        }}
+        .chart-grid-section2 img {{
+            width: 100%;
+            height: auto;
+            display: block;
+            max-width: 100%;
         }}
     </style>
 </head>
@@ -1778,4 +1877,5 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 

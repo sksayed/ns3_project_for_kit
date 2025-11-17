@@ -1,19 +1,77 @@
 # Cross-Technology Network Performance Analysis: 4G, 5G, and WiFi Mesh
 
+**Reported by:** Sheikh Sayed Bin Rahman
+
+### Simulation Approach
+
+Simulations were conducted using NS-3 network simulator across three technologies (WiFi Mesh, 4G LTE, and 5G NR) following a systematic matrix approach. **STA/UE nodes were positioned using uniform random distribution** across the 400×400×30 m stage, avoiding building obstacles. A comprehensive scenario matrix was generated covering all combinations of: 3 RNG seeds (6, 7, 8), 3 node counts (5, 10, 15), and 3 payload sizes (10KB, 50KB, 1MB), with WiFi Mesh additionally varying across 2 frequency bands (2.4 GHz and 5 GHz).
+
+Each simulation executed for 30 seconds with Gauss-Markov 3D mobility model for STA/UE movement. Network performance metrics (PDR, Throughput, Delay, Jitter) were collected using FlowMonitor and aggregated across seeds to compute mean values, standard deviations, and statistical distributions. Results were analyzed to compare technology performance across scalability (node count variation), traffic load impact (payload size variation), and overall reliability metrics.
 - Scenarios analyzed: 108
-- Generated on: 2025-11-14 22:05:20
+
+## Common Configuration
+
+| Metric | WiFi Mesh | 4G | 5G |
+| --- | --- | --- | --- |
+| Stage Structure: 400×400×30 m | ✓ | ✓ | ✓ |
+| Building Obstacles: 7 buildings | ✓ | ✓ | ✓ |
+| Propagation Loss Model:<br>HybridBuildingsPropagationLossModel | ✓ | ✓ | ✓ |
+| RNG Seeds: 6, 7, 8 | ✓ | ✓ | ✓ |
+| Simulation Time: 30.0 s | ✓ | ✓ | ✓ |
+| Node Counts: 5, 10, 15 | ✓ | ✓ | ✓ |
+| Payload Size: 10KB, 50KB, 1MB | ✓ | ✓ | ✓ |
+| UE/STA Mobility: Gauss-Markov 3D movement | ✓ | ✓ | ✓ |
+| UE/STA TX Power: 15.0 dBm | ✓ | ✓ | ✓ |
+| Traffic Flows:<br>HTTP, HTTPS, Video (TCP),<br>VoIP (UDP), Mixed | ✓ | ✓ | ✓ |
 
 ## WiFi Mesh Network Visualization
 
 ![WiFi Mesh 3D Stage Visualization](figures/3d_stage_visualization_wifi_mesh.png)
 
+### WiFi Mesh Configuration
+
+| Parameter | Value |
+| --- | --- |
+| Mesh Protocol | 802.11s (Dot11sStack) |
+| WiFi Standard (Mesh Backhaul) | 802.11n @ 2.4 GHz |
+| Data Mode | HtMcs7 |
+| TX Power (Mesh Backhaul) | 23.0 dBm |
+| TX Power (Hotspot/AP) | 22.0 dBm @ 5 GHz |
+| RX Sensitivity | -90.0 dBm |
+| Antenna Gain (RX/TX) | 5.0 dB / 5.0 dB |
+| Number of Mesh Interfaces | 1 |
+| Hotspot Band | 5 GHz (802.11ac) |
+
 ## 5G Network Visualization
 
 ![5G 3D Stage Visualization](figures/3d_stage_visualization_5g.png)
 
+### 5G NR Configuration
+
+| Parameter | Value |
+| --- | --- |
+| Central Frequency | 3.5 GHz |
+| Bandwidth | 100 MHz |
+| Channel Model | RMa (Rural Macro) |
+| Channel Model Type | ThreeGpp |
+| Beamforming Algorithm | IdealBeamformingHelper (DirectPathBeamforming) |
+| gNB TX Power | ~43 dBm (macro cell) |
+| Number of Component Carriers | 1 |
+| Number of Bandwidth Parts | 1 |
+
 ## 4G Network Visualization
 
 ![4G 3D Stage Visualization](figures/3d_stage_visualization_lte.png)
+
+### 4G LTE Configuration
+
+| Parameter | Value |
+| --- | --- |
+| Frequency | 2.0 GHz |
+| eNB TX Power | 43.0 dBm |
+| Handover Algorithm | A3RsrpHandoverAlgorithm |
+| Handover Hysteresis | 3.0 dB |
+| Time To Trigger | 160 ms |
 
 ## 1. Cross-Technology Performance
 
@@ -163,3 +221,13 @@
 | WIFI Mesh (5 GHz) | 89.62 | 1.72 | 75.35 |
 | 4G | 91.86 | 1.99 | 41.70 |
 | 5G | 90.60 | 3.15 | 11.81 |
+
+## Summary
+
+This analysis of 108 simulation scenarios demonstrates that **WiFi Mesh performs well** and offers a **cost-effective alternative** to 4G and 5G technologies.
+
+**WiFi Mesh (2.4 GHz) achieves the highest Packet Delivery Ratio (PDR) of 93.99%**, indicating superior reliability. While 5G leads in throughput (2.95 Mbps) and latency (11.74 ms), WiFi Mesh maintains competitive performance with 1.63 Mbps throughput and shows robust scalability across different node counts.
+
+**WiFi Mesh is highly cost-effective** compared to cellular technologies. It uses unlicensed spectrum (2.4 GHz and 5 GHz), requires no spectrum licensing fees, and can be deployed with standard commercial equipment. The mesh protocol (802.11s) enables self-organizing networks, reducing deployment complexity and operational costs.
+
+**Conclusion**: WiFi Mesh is **feasible and cost-effective for implementation** in scenarios prioritizing reliability and cost-efficiency. Its strong PDR performance, combined with significantly lower deployment and operational costs compared to 4G and 5G, makes it a compelling choice for many network deployment scenarios.
