@@ -42,6 +42,8 @@ Each simulation executed for 30 seconds with Gauss-Markov 3D mobility model for 
 | Number of Mesh Interfaces | 1 |
 | Hotspot Band | 5 GHz (802.11ac) |
 
+*Reference: Values sourced from the TP-Link EAP225-Outdoor specifications at [https://www.tp-link.com/us/business-networking/omada-sdn-access-point/eap225-outdoor/v1/#specifications](https://www.tp-link.com/us/business-networking/omada-sdn-access-point/eap225-outdoor/v1/#specifications).*
+
 ## 5G Network Visualization
 
 ![5G 3D Stage Visualization](figures/3d_stage_visualization_5g.png)
@@ -59,6 +61,8 @@ Each simulation executed for 30 seconds with Gauss-Markov 3D mobility model for 
 | Number of Component Carriers | 1 |
 | Number of Bandwidth Parts | 1 |
 
+*Reference: Values derived from the NS-3 default NR configuration.*
+
 ## 4G Network Visualization
 
 ![4G 3D Stage Visualization](figures/3d_stage_visualization_lte.png)
@@ -72,6 +76,8 @@ Each simulation executed for 30 seconds with Gauss-Markov 3D mobility model for 
 | Handover Algorithm | A3RsrpHandoverAlgorithm |
 | Handover Hysteresis | 3.0 dB |
 | Time To Trigger | 160 ms |
+
+*Reference: Values derived from the NS-3 default LTE configuration.*
 
 ## 1. Cross-Technology Performance
 
@@ -96,10 +102,10 @@ Each simulation executed for 30 seconds with Gauss-Markov 3D mobility model for 
 
 ## 2. Scalability Trends
 
-- WIFI Mesh (2.4 GHz) PDR changes by 9.04 points and delay by 44.18 ms between 5 and 15 nodes.
-- WIFI Mesh (5 GHz) PDR changes by 10.79 points and delay by 55.19 ms between 5 and 15 nodes.
-- 4G PDR changes by 7.52 points and delay by 27.67 ms between 5 and 15 nodes.
-- 5G PDR changes by 7.17 points and delay by 1.34 ms between 5 and 15 nodes.
+- WIFI Mesh (2.4 GHz) loses 9.04 percentage points of PDR and adds 44.18 ms delay between 5 and 15 nodes.
+- WIFI Mesh (5 GHz) loses 10.79 percentage points of PDR and adds 55.19 ms delay between 5 and 15 nodes.
+- 4G loses 7.52 percentage points of PDR and adds 27.67 ms delay between 5 and 15 nodes.
+- 5G gains 7.17 percentage points of PDR and adds 1.34 ms delay between 5 and 15 nodes.
 
 ![Scalability Trends: PDR (%)](figures/section2_pdr.png)
 
@@ -184,10 +190,10 @@ Each simulation executed for 30 seconds with Gauss-Markov 3D mobility model for 
 
 ## 4. Traffic Load Impact
 
-- WIFI Mesh (2.4 GHz) loses 9.81 PDR points and adds 75.22 ms delay from 10KB to 1MB payload.
-- WIFI Mesh (5 GHz) loses 8.92 PDR points and adds 72.08 ms delay from 10KB to 1MB payload.
-- 4G gains 2.15 PDR points and adds 24.87 ms delay from 10KB to 1MB payload.
-- 5G gains 5.36 PDR points and reduces 0.04 ms delay from 10KB to 1MB payload.
+- WIFI Mesh (2.4 GHz) loses 9.81 percentage points of PDR and adds 75.22 ms delay from 10KB to 1MB payload.
+- WIFI Mesh (5 GHz) loses 8.92 percentage points of PDR and adds 72.08 ms delay from 10KB to 1MB payload.
+- 4G gains 2.15 percentage points of PDR and adds 24.87 ms delay from 10KB to 1MB payload.
+- 5G gains 5.36 percentage points of PDR and reduces 0.04 ms delay from 10KB to 1MB payload.
 
 ![Traffic Load Impact: PDR (%)](figures/section4_pdr.png)
 
